@@ -5,8 +5,8 @@
 не должны передаваться во внешние AI API.
 
 Проект разрабатывается поэтапно. Текущая версия включает foundation, приём
-документов, локальные embeddings, Qdrant indexing и debugging retrieval API.
-Фоновые задания, LLM и RAG ещё не реализованы.
+документов, локальные embeddings, Qdrant indexing, Redis/Taskiq background jobs
+и debugging retrieval API. LLM и RAG ещё не реализованы.
 
 ## Текущие возможности
 
@@ -24,15 +24,18 @@
 - `EmbeddingProvider` с deterministic mock и sentence-transformers adapter;
 - Qdrant adapter с cosine collection и фильтрацией по `document_ids`;
 - идемпотентный indexing service и retrieval endpoint;
-- Dockerfile и Docker Compose для API и PostgreSQL;
+- Redis Streams broker и отдельный Taskiq worker;
+- сохраняемая в PostgreSQL job state machine, retries и exponential backoff;
+- `GET /api/v1/jobs/{job_id}` для наблюдения за ingestion;
+- Dockerfile и Docker Compose для API, worker, scheduler, PostgreSQL, Qdrant и Redis;
 - pytest, Ruff, mypy, pre-commit и GitHub Actions.
 
 ## Архитектура
 
 AirGapRAG строится как modular monolith. API и будущий background worker будут
 разными процессами одной кодовой базы. PostgreSQL используется как источник
-истины для metadata. Qdrant используется как производный vector index. Redis и
-local LLM runtime будут подключаться на последующих этапах.
+истины для metadata. Qdrant используется как производный vector index. Local
+LLM runtime будет подключён на последующих этапах.
 
 ```text
 HTTP client
@@ -45,12 +48,13 @@ HTTP client
 Подробности: [docs/architecture.md](docs/architecture.md).
 Поток загрузки документов: [docs/document-ingestion.md](docs/document-ingestion.md).
 Embeddings и vector indexing: [docs/vector-indexing.md](docs/vector-indexing.md).
+Background jobs: [docs/background-jobs.md](docs/background-jobs.md).
 
 ## Требования
 
 - Python 3.12 или 3.13;
 - Docker с Compose plugin — для контейнерного запуска;
-- PostgreSQL 17 и Qdrant 1.19 — если API запускается без Compose.
+- PostgreSQL 17, Qdrant 1.19 и Redis 8 — если процессы запускаются без Compose.
 
 ## Локальная установка
 
@@ -111,8 +115,8 @@ docker compose run --rm api python -m alembic upgrade head
 curl -F "file=@./document.pdf" http://localhost:8000/api/v1/documents
 ```
 
-Новый файл возвращает HTTP 201 и metadata со статусом `PENDING`. Повтор файла
-с тем же SHA-256 возвращает HTTP 200, существующий `document_id` и
+Новый файл возвращает HTTP 202, `document_id`, `job_id` и статус `PENDING`.
+Повтор файла с тем же SHA-256 возвращает HTTP 200, существующие identifiers и
 `deduplicated: true`.
 
 Получение metadata:
@@ -121,9 +125,13 @@ curl -F "file=@./document.pdf" http://localhost:8000/api/v1/documents
 curl http://localhost:8000/api/v1/documents/<document_id>
 ```
 
-Upload не выполняет parsing и chunking внутри HTTP request. В текущей фазе
-парсеры и chunker доступны как отдельные компоненты; их запуск через Taskiq
-worker появится в PHASE 4.
+Upload не выполняет parsing и chunking внутри HTTP request. После фиксации
+metadata API отправляет `job_id` в Redis, а Taskiq worker запускает полный
+pipeline. Состояние задания:
+
+```bash
+curl http://localhost:8000/api/v1/jobs/<job_id>
+```
 
 ## Retrieval API
 
@@ -196,6 +204,12 @@ python -m pytest
 | `QDRANT_COLLECTION` | Collection для chunks | `document_chunks` |
 | `QDRANT_TIMEOUT_SECONDS` | Timeout Qdrant operations | `10` |
 | `RETRIEVAL_TOP_K` | Default retrieval limit | `10` |
+| `REDIS_URL` | Redis для Taskiq broker и retry schedule | `redis://localhost:6379/0` |
+| `JOB_MAX_ATTEMPTS` | Максимальное число попыток ingestion | `3` |
+| `JOB_TIMEOUT_SECONDS` | Timeout одной попытки | `900` |
+| `JOB_RETRY_DELAY_SECONDS` | Начальная задержка retry | `5` |
+| `JOB_RETRY_MAX_DELAY_SECONDS` | Верхняя граница backoff | `60` |
+| `JOB_STALE_AFTER_SECONDS` | Возраст для повторного claim зависшего job | `960` |
 
 ## Структура
 
@@ -209,6 +223,7 @@ src/airgap_rag/embeddings/ embedding providers
 src/airgap_rag/vector_store/ Qdrant adapter
 src/airgap_rag/indexing/  indexing orchestration
 src/airgap_rag/retrieval/ retrieval service
+src/airgap_rag/jobs/      job state machine, broker and worker tasks
 alembic/               database migrations
 tests/                 automated tests
 docs/                  Russian technical documentation and ADR
@@ -216,13 +231,12 @@ docs/                  Russian technical documentation and ADR
 
 ## Ограничения текущей версии
 
-- автоматический запуск indexing пока отсутствует;
-- background job и `job_id` появятся вместе с Taskiq в PHASE 4;
 - DOCX parser извлекает paragraphs и tables, но не восстанавливает layout;
 - scanned PDF без текстового слоя требует будущего OCR и сейчас даст пустой текст;
 - default mock embeddings не обеспечивают semantic relevance;
 - sentence-transformers package и model не входят в базовый Docker image;
-- Redis и Taskiq не подключены;
+- нет отдельной outbox-таблицы: если dispatch в Redis не удался, сохранённый
+  `PENDING` job будет повторно отправлен при повторной загрузке того же файла;
 - local LLM provider не подключён;
 - реальная embedding model должна быть подготовлена отдельно.
 
@@ -232,7 +246,7 @@ docs/                  Russian technical documentation and ADR
 - [x] Foundation
 - [x] Documents and parsing
 - [x] Embeddings and Qdrant
-- [ ] Background jobs
+- [x] Background jobs
 - [ ] Local LLM
 - [ ] RAG and citations
 - [ ] SSE streaming

@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 from airgap_rag.core.config import Settings
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
+from airgap_rag.jobs.service import JobPublisher
 from airgap_rag.main import create_app
 from airgap_rag.vector_store.base import VectorPoint, VectorSearchResult
 
@@ -55,6 +56,17 @@ class FakeVectorStore:
         self.closed = True
 
 
+class FakeJobPublisher(JobPublisher):
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.enqueued: list[UUID] = []
+
+    async def enqueue_ingestion(self, job_id: UUID) -> None:
+        if self.error is not None:
+            raise self.error
+        self.enqueued.append(job_id)
+
+
 @pytest.fixture
 def runtime_path() -> Iterator[Path]:
     path = Path("tests/.runtime") / uuid4().hex
@@ -85,6 +97,7 @@ async def client(settings: Settings, fake_database: FakeDatabase) -> AsyncIterat
         database=fake_database,
         embedding_provider=MockEmbeddingProvider(8),
         vector_store=FakeVectorStore(),
+        job_publisher=FakeJobPublisher(),
     )
     async with application.router.lifespan_context(application):
         async with AsyncClient(

@@ -1,14 +1,17 @@
+x-app-environment: &app-environment
+  APP_ENV: development
+  DATABASE_URL: postgresql+asyncpg://airgap:airgap@postgres:5432/airgap_rag
+  DOCUMENT_STORAGE_PATH: /data/documents
+  EMBEDDING_PROVIDER: mock
+  LOG_LEVEL: INFO
+  QDRANT_URL: http://qdrant:6333
+  REDIS_URL: redis://redis:6379/0
+
 services:
   api:
     build:
       context: .
-    environment:
-      APP_ENV: development
-      DATABASE_URL: postgresql+asyncpg://airgap:airgap@postgres:5432/airgap_rag
-      DOCUMENT_STORAGE_PATH: /data/documents
-      EMBEDDING_PROVIDER: mock
-      LOG_LEVEL: INFO
-      QDRANT_URL: http://qdrant:6333
+    environment: *app-environment
     ports:
       - "8000:8000"
     depends_on:
@@ -16,6 +19,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD
@@ -30,6 +35,43 @@ services:
       start_period: 5s
     volumes:
       - document_data:/data/documents
+
+  worker:
+    build:
+      context: .
+    command:
+      - taskiq
+      - worker
+      - airgap_rag.jobs.broker:broker
+      - airgap_rag.jobs.tasks
+      - --workers
+      - "1"
+      - --max-async-tasks
+      - "1"
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    volumes:
+      - document_data:/data/documents
+
+  scheduler:
+    build:
+      context: .
+    command:
+      - taskiq
+      - scheduler
+      - airgap_rag.jobs.broker:scheduler
+      - --update-interval
+      - "1"
+    environment: *app-environment
+    depends_on:
+      redis:
+        condition: service_healthy
 
   postgres:
     image: postgres:17-alpine
@@ -55,7 +97,21 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  redis:
+    image: redis:8.2-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   postgres_data:
   document_data:
   qdrant_data:
+  redis_data:

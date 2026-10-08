@@ -23,3 +23,13 @@ def test_settings_reject_invalid_qdrant_url() -> None:
 def test_settings_reject_invalid_qdrant_collection() -> None:
     with pytest.raises(ValidationError):
         Settings(qdrant_collection="chunks/unsafe")
+
+
+def test_settings_reject_invalid_redis_url() -> None:
+    with pytest.raises(ValidationError):
+        Settings(redis_url="localhost:6379")
+
+
+def test_job_stale_timeout_must_exceed_execution_timeout() -> None:
+    with pytest.raises(ValidationError):
+        Settings(job_timeout_seconds=60, job_stale_after_seconds=60)

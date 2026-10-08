@@ -6,7 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from airgap_rag.chunking.base import Chunk
 from airgap_rag.db.models.documents import Document, DocumentChunk
+from airgap_rag.db.models.jobs import Job
 from airgap_rag.documents.types import DocumentStatus
+from airgap_rag.jobs.state_machine import transition_job
+from airgap_rag.jobs.types import JobStatus
 
 
 class IndexingRepository(Protocol):
@@ -28,8 +31,9 @@ class IndexingRepository(Protocol):
 
 
 class SQLAlchemyIndexingRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, job_id: UUID | None = None) -> None:
         self._session = session
+        self._job_id = job_id
 
     async def get_document(self, document_id: UUID) -> Document | None:
         return await self._session.get(Document, document_id)
@@ -44,6 +48,11 @@ class SQLAlchemyIndexingRepository:
         document.status = status
         if page_count is not None:
             document.page_count = page_count
+        if self._job_id is not None:
+            job = await self._session.get(Job, self._job_id)
+            if job is None:
+                raise RuntimeError(f"Job {self._job_id} disappeared during indexing")
+            transition_job(job, JobStatus(status.value))
         await self._session.commit()
 
     async def replace_chunks(self, document_id: UUID, chunks: tuple[Chunk, ...]) -> None:

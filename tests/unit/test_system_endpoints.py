@@ -3,7 +3,7 @@ from httpx import ASGITransport, AsyncClient
 from airgap_rag.core.config import Settings
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
 from airgap_rag.main import create_app
-from tests.conftest import FakeDatabase, FakeVectorStore
+from tests.conftest import FakeDatabase, FakeJobPublisher, FakeVectorStore
 
 
 async def test_health_returns_ok(client: AsyncClient) -> None:
@@ -37,6 +37,7 @@ async def test_ready_returns_503_when_database_is_unavailable(settings: Settings
         database=database,
         embedding_provider=MockEmbeddingProvider(8),
         vector_store=FakeVectorStore(),
+        job_publisher=FakeJobPublisher(),
     )
     async with application.router.lifespan_context(application):
         async with AsyncClient(
@@ -58,6 +59,7 @@ async def test_ready_returns_503_when_qdrant_is_unavailable(settings: Settings) 
         database=FakeDatabase(),
         embedding_provider=MockEmbeddingProvider(8),
         vector_store=FakeVectorStore(healthy=False),
+        job_publisher=FakeJobPublisher(),
     )
     async with application.router.lifespan_context(application):
         async with AsyncClient(

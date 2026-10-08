@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from airgap_rag.chunking.recursive import RecursiveCharacterChunker
@@ -15,10 +17,11 @@ def create_indexing_service(
     session: AsyncSession,
     embedding_provider: EmbeddingProvider,
     vector_store: VectorStore,
+    job_id: UUID | None = None,
 ) -> IndexingService:
     """Compose the indexing pipeline without coupling it to an HTTP endpoint."""
     return IndexingService(
-        repository=SQLAlchemyIndexingRepository(session),
+        repository=SQLAlchemyIndexingRepository(session, job_id=job_id),
         store=LocalDocumentStore(
             root=settings.document_storage_path,
             max_upload_bytes=settings.document_max_upload_bytes,

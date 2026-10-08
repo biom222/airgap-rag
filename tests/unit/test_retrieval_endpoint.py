@@ -8,7 +8,7 @@ from airgap_rag.core.config import Settings
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
 from airgap_rag.main import create_app
 from airgap_rag.retrieval.service import RetrievalService, RetrievedChunk
-from tests.conftest import FakeDatabase, FakeVectorStore
+from tests.conftest import FakeDatabase, FakeJobPublisher, FakeVectorStore
 
 
 class StubRetrievalService(RetrievalService):
@@ -45,6 +45,7 @@ async def test_retrieval_endpoint_returns_debug_metadata(settings: Settings) -> 
         database=FakeDatabase(),
         embedding_provider=MockEmbeddingProvider(8),
         vector_store=FakeVectorStore(),
+        job_publisher=FakeJobPublisher(),
     )
 
     async def override_service() -> AsyncIterator[RetrievalService]:
@@ -83,6 +84,7 @@ async def test_retrieval_endpoint_rejects_blank_question(settings: Settings) -> 
         database=FakeDatabase(),
         embedding_provider=MockEmbeddingProvider(8),
         vector_store=FakeVectorStore(),
+        job_publisher=FakeJobPublisher(),
     )
 
     async def override_service() -> AsyncIterator[RetrievalService]:

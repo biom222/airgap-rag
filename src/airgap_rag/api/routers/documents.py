@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/v1/documents", tags=["documents"])
 @router.post(
     "",
     response_model=DocumentUploadResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
         status.HTTP_200_OK: {"model": DocumentUploadResponse},
         status.HTTP_413_CONTENT_TOO_LARGE: {},
@@ -29,7 +29,11 @@ async def upload_document(
     if result.deduplicated:
         response.status_code = status.HTTP_200_OK
     payload = DocumentResponse.model_validate(result.document).model_dump()
-    return DocumentUploadResponse(**payload, deduplicated=result.deduplicated)
+    return DocumentUploadResponse(
+        **payload,
+        job_id=result.job.id,
+        deduplicated=result.deduplicated,
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)

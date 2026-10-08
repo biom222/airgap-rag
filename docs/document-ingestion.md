@@ -1,11 +1,10 @@
 # Document ingestion
 
-## Граница PHASE 2
+## Граница PHASE 4
 
-На этом этапе реализован безопасный приём файла и независимые компоненты parsing
-и chunking. Очередь заданий, retries и orchestration появятся в PHASE 4. Поэтому
-upload создаёт `Document` со статусом `PENDING`, но не выполняет тяжёлую работу в
-HTTP request.
+Upload выполняет только безопасный приём файла, дедупликацию и атомарное создание
+`Document` + `Job`. Parsing, chunking, embeddings и Qdrant indexing выполняет
+Taskiq worker вне HTTP request.
 
 ## Upload
 
@@ -17,7 +16,9 @@ HTTP request.
    распакованный размер.
 6. По SHA-256 ищется существующий документ.
 7. Новый файл атомарно перемещается под server-generated storage key.
-8. Metadata фиксируется в PostgreSQL.
+8. `Document` и ingestion `Job` фиксируются одной транзакцией PostgreSQL.
+9. После commit API отправляет только `job_id` в Redis Stream.
+10. Новый upload возвращает HTTP 202.
 
 Уникальный constraint по SHA-256 закрывает race двух одновременных uploads. Если
 вторая транзакция проиграла гонку, её файл удаляется, а API возвращает metadata

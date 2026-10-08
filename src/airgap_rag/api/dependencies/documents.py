@@ -10,6 +10,7 @@ from airgap_rag.db.repositories.documents import SQLAlchemyDocumentRepository
 from airgap_rag.documents.service import DocumentService
 from airgap_rag.documents.storage import LocalDocumentStore
 from airgap_rag.documents.validation import DocumentValidator
+from airgap_rag.jobs.service import JobPublisher
 
 
 class SessionDatabase(Protocol):
@@ -19,6 +20,7 @@ class SessionDatabase(Protocol):
 async def get_document_service(request: Request) -> AsyncIterator[DocumentService]:
     settings = cast(Settings, request.app.state.settings)
     database = cast(SessionDatabase, request.app.state.database)
+    publisher = cast(JobPublisher, request.app.state.job_publisher)
     async with database.session() as session:
         yield DocumentService(
             repository=SQLAlchemyDocumentRepository(session),
@@ -28,4 +30,5 @@ async def get_document_service(request: Request) -> AsyncIterator[DocumentServic
                 read_chunk_bytes=settings.document_read_chunk_bytes,
             ),
             validator=DocumentValidator(settings.document_max_docx_uncompressed_bytes),
+            publisher=publisher,
         )

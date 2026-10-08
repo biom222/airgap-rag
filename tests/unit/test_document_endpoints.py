@@ -8,19 +8,23 @@ from httpx import ASGITransport, AsyncClient
 from airgap_rag.api.dependencies.documents import get_document_service
 from airgap_rag.core.config import Settings
 from airgap_rag.db.models.documents import Document
+from airgap_rag.db.models.jobs import Job
 from airgap_rag.documents.service import DocumentService, UploadResult
 from airgap_rag.documents.types import DocumentStatus
+from airgap_rag.embeddings.mock import MockEmbeddingProvider
+from airgap_rag.jobs.types import JobStatus, JobType
 from airgap_rag.main import create_app
-from tests.conftest import FakeDatabase
+from tests.conftest import FakeDatabase, FakeJobPublisher, FakeVectorStore
 
 
 class StubDocumentService(DocumentService):
-    def __init__(self, document: Document, deduplicated: bool) -> None:
+    def __init__(self, document: Document, job: Job, deduplicated: bool) -> None:
         self.document = document
+        self.job = job
         self.deduplicated = deduplicated
 
     async def upload(self, upload: UploadFile) -> UploadResult:
-        return UploadResult(self.document, self.deduplicated)
+        return UploadResult(self.document, self.job, self.deduplicated)
 
     async def get(self, document_id: UUID) -> Document:
         return self.document
@@ -42,10 +46,30 @@ def make_document() -> Document:
     )
 
 
+def make_job(document: Document) -> Job:
+    now = datetime.now(UTC)
+    return Job(
+        id=uuid4(),
+        document_id=document.id,
+        type=JobType.INGESTION,
+        status=JobStatus.PENDING,
+        progress=0,
+        attempt=0,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 async def make_client(
     settings: Settings, service: StubDocumentService
 ) -> AsyncIterator[AsyncClient]:
-    application = create_app(settings=settings, database=FakeDatabase())
+    application = create_app(
+        settings=settings,
+        database=FakeDatabase(),
+        embedding_provider=MockEmbeddingProvider(8),
+        vector_store=FakeVectorStore(),
+        job_publisher=FakeJobPublisher(),
+    )
 
     async def override_service() -> AsyncIterator[DocumentService]:
         yield service
@@ -58,21 +82,25 @@ async def make_client(
             yield client
 
 
-async def test_upload_returns_201_for_new_document(settings: Settings) -> None:
-    service = StubDocumentService(make_document(), deduplicated=False)
+async def test_upload_returns_202_with_job_for_new_document(settings: Settings) -> None:
+    document = make_document()
+    job = make_job(document)
+    service = StubDocumentService(document, job, deduplicated=False)
 
     async for client in make_client(settings, service):
         response = await client.post(
             "/api/v1/documents", files={"file": ("notes.txt", b"hello", "text/plain")}
         )
 
-    assert response.status_code == 201
+    assert response.status_code == 202
     assert response.json()["deduplicated"] is False
     assert response.json()["status"] == "PENDING"
+    assert response.json()["job_id"] == str(job.id)
 
 
 async def test_upload_returns_existing_document_for_duplicate(settings: Settings) -> None:
-    service = StubDocumentService(make_document(), deduplicated=True)
+    document = make_document()
+    service = StubDocumentService(document, make_job(document), deduplicated=True)
 
     async for client in make_client(settings, service):
         response = await client.post(
@@ -85,7 +113,7 @@ async def test_upload_returns_existing_document_for_duplicate(settings: Settings
 
 async def test_get_document_returns_metadata(settings: Settings) -> None:
     document = make_document()
-    service = StubDocumentService(document, deduplicated=False)
+    service = StubDocumentService(document, make_job(document), deduplicated=False)
 
     async for client in make_client(settings, service):
         response = await client.get(f"/api/v1/documents/{document.id}")

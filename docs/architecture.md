@@ -2,10 +2,11 @@
 
 ## Текущий этап
 
-На PHASE 3 реализованы foundation, documents boundary, embedding providers,
-Qdrant adapter, indexing orchestration и retrieval debugging endpoint.
+На PHASE 4 реализованы foundation, documents boundary, embedding providers,
+Qdrant adapter, indexing orchestration, Redis/Taskiq background jobs и retrieval
+debugging endpoint.
 
-Taskiq, retries, LLM, reranking и RAG пока являются запланированными границами.
+LLM, reranking и RAG пока являются запланированными границами.
 
 ## Направление зависимостей
 
@@ -25,11 +26,11 @@ Qdrant, Redis и model runtimes будет изолирована в adapters.
 
 ## Процессы
 
-После подключения фоновой обработки одна кодовая база будет иметь две точки
-запуска:
+Одна кодовая база имеет три точки запуска:
 
 - API process принимает HTTP и SSE requests;
 - worker process выполняет parsing, embeddings и indexing.
+- scheduler process публикует отложенные retries из Redis schedule source.
 
 Это разделение процессов не превращает приложение в набор микросервисов:
 deployment, domain model и repository остаются общими.
@@ -96,3 +97,23 @@ question
 Qdrant является производным индексом. Полный текст возвращается из PostgreSQL,
 а Qdrant payload содержит identifiers и metadata. Потерянную collection можно
 восстановить повторной индексацией документов.
+
+## Background jobs boundary
+
+```text
+POST /documents
+    -> PostgreSQL: Document + Job(PENDING)
+    -> Redis Stream: job_id
+    -> Taskiq worker
+    -> JobExecutionService
+    -> IndexingService
+    -> Job(READY) + Document(READY)
+```
+
+Redis отвечает за доставку, но не является источником истины для состояния.
+Taskiq использует acknowledgements и допускает повторную доставку. Claim job и
+номер попытки фиксируются в PostgreSQL; параллельная duplicate delivery
+пропускается. После process crash старый active job разрешено забрать повторно
+только после `JOB_STALE_AFTER_SECONDS`.
+
+Подробнее: [background-jobs.md](background-jobs.md).

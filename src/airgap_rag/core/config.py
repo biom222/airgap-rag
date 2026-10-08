@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     qdrant_timeout_seconds: int = Field(default=10, gt=0)
     retrieval_top_k: int = Field(default=10, ge=1, le=100)
 
+    redis_url: str = "redis://localhost:6379/0"
+    job_max_attempts: int = Field(default=3, ge=1, le=20)
+    job_timeout_seconds: int = Field(default=900, ge=1)
+    job_retry_delay_seconds: int = Field(default=5, ge=1)
+    job_retry_max_delay_seconds: int = Field(default=60, ge=1)
+    job_stale_after_seconds: int = Field(default=960, ge=1)
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
@@ -69,10 +76,24 @@ class Settings(BaseSettings):
             raise ValueError("QDRANT_COLLECTION contains unsupported characters")
         return value
 
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(cls, value: str) -> str:
+        if not value.startswith(("redis://", "rediss://")):
+            raise ValueError("REDIS_URL must use the redis or rediss scheme")
+        return value
+
     @model_validator(mode="after")
     def validate_chunking(self) -> "Settings":
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+        if self.job_retry_max_delay_seconds < self.job_retry_delay_seconds:
+            raise ValueError(
+                "JOB_RETRY_MAX_DELAY_SECONDS must be greater than or equal to "
+                "JOB_RETRY_DELAY_SECONDS"
+            )
+        if self.job_stale_after_seconds <= self.job_timeout_seconds:
+            raise ValueError("JOB_STALE_AFTER_SECONDS must be greater than JOB_TIMEOUT_SECONDS")
         return self
 
 

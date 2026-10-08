@@ -21,4 +21,5 @@ class DocumentResponse(BaseModel):
 
 
 class DocumentUploadResponse(DocumentResponse):
+    job_id: UUID
     deduplicated: bool

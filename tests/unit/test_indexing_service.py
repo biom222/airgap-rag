@@ -47,11 +47,16 @@ class FakeIndexingRepository:
 
 
 class FakeIndexVectorStore:
-    def __init__(self, fail_upsert: bool = False) -> None:
+    def __init__(
+        self,
+        fail_upsert: bool = False,
+        partial_failures_remaining: int = 0,
+    ) -> None:
         self.dimension: int | None = None
         self.points: dict[UUID, VectorPoint] = {}
         self.deleted_documents: list[UUID] = []
         self.fail_upsert = fail_upsert
+        self.partial_failures_remaining = partial_failures_remaining
 
     async def ensure_collection(self, dimension: int) -> None:
         self.dimension = dimension
@@ -67,6 +72,10 @@ class FakeIndexVectorStore:
     async def upsert(self, points: list[VectorPoint]) -> None:
         if self.fail_upsert:
             raise RuntimeError("qdrant unavailable")
+        if self.partial_failures_remaining > 0:
+            self.partial_failures_remaining -= 1
+            self.points[points[0].id] = points[0]
+            raise ConnectionError("worker crashed after partial vector write")
         self.points.update({point.id: point for point in points})
 
     async def search(
@@ -152,3 +161,28 @@ async def test_indexing_marks_document_failed_when_qdrant_fails(runtime_path: Pa
     assert repository.statuses[-1] == DocumentStatus.FAILED
     assert repository.chunks
     assert repository.rollbacks == 1
+
+
+async def test_retry_replaces_partial_vectors_without_duplicates(runtime_path: Path) -> None:
+    document = make_document()
+    write_stored_document(
+        runtime_path,
+        document.storage_key,
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda",
+    )
+    repository = FakeIndexingRepository(document)
+    vector_store = FakeIndexVectorStore(partial_failures_remaining=1)
+    service = make_service(runtime_path, repository, vector_store)
+
+    with pytest.raises(ConnectionError, match="partial vector write"):
+        await service.index_document(document.id, mark_failed_on_error=False)
+
+    partial_ids = set(vector_store.points)
+    assert len(partial_ids) == 1
+
+    result = await service.index_document(document.id, mark_failed_on_error=False)
+
+    assert result.status == DocumentStatus.READY
+    assert len(vector_store.points) == result.chunk_count
+    assert partial_ids <= set(vector_store.points)
+    assert vector_store.deleted_documents == [document.id, document.id]

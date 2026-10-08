@@ -45,7 +45,12 @@ class IndexingService:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
 
-    async def index_document(self, document_id: UUID) -> IndexingResult:
+    async def index_document(
+        self,
+        document_id: UUID,
+        *,
+        mark_failed_on_error: bool = True,
+    ) -> IndexingResult:
         document = await self._repository.get_document(document_id)
         if document is None:
             raise DocumentNotFoundError()
@@ -82,7 +87,8 @@ class IndexingService:
             )
             await self._repository.set_status(document, DocumentStatus.READY)
         except Exception:
-            await self._mark_failed(document)
+            if mark_failed_on_error:
+                await self._mark_failed(document)
             raise
 
         return IndexingResult(
