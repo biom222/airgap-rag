@@ -11,6 +11,8 @@ from airgap_rag.embeddings.factory import create_embedding_provider
 from airgap_rag.jobs.service import JobPublisher
 from airgap_rag.llm.base import LLMProvider
 from airgap_rag.llm.factory import create_llm_provider
+from airgap_rag.reranking.base import Reranker
+from airgap_rag.reranking.factory import create_reranker
 from airgap_rag.vector_store.base import VectorStore
 from airgap_rag.vector_store.factory import create_vector_store
 
@@ -37,10 +39,12 @@ def create_lifespan(
     job_publisher: JobPublisher | None = None,
     task_broker: TaskBroker | None = None,
     llm_provider: LLMProvider | None = None,
+    reranker: Reranker | None = None,
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     resolved_embedding_provider = embedding_provider or create_embedding_provider(settings)
     resolved_vector_store = vector_store or create_vector_store(settings)
     resolved_llm_provider = llm_provider or create_llm_provider(settings)
+    resolved_reranker = reranker or create_reranker(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -50,6 +54,7 @@ def create_lifespan(
         app.state.vector_store = resolved_vector_store
         app.state.job_publisher = job_publisher
         app.state.llm_provider = resolved_llm_provider
+        app.state.reranker = resolved_reranker
         if task_broker is not None and not task_broker.is_worker_process:
             await task_broker.startup()
         logger.info("application_started", extra={"app_env": settings.app_env})

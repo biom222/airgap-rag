@@ -43,3 +43,8 @@ def test_settings_reject_empty_ollama_model() -> None:
 def test_job_stale_timeout_must_exceed_execution_timeout() -> None:
     with pytest.raises(ValidationError):
         Settings(job_timeout_seconds=60, job_stale_after_seconds=60)
+
+
+def test_reranker_top_n_must_not_exceed_retrieval_top_k() -> None:
+    with pytest.raises(ValidationError):
+        Settings(retrieval_top_k=5, reranker_top_n=6)

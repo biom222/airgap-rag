@@ -24,6 +24,7 @@ async def search(
     results = await service.search(
         payload.question,
         top_k=payload.top_k or settings.retrieval_top_k,
+        top_n=payload.top_n or settings.reranker_top_n,
         document_ids=payload.document_ids,
     )
     return RetrievalSearchResponse(

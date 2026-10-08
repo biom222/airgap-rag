@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from airgap_rag.chunking.base import Chunk
 from airgap_rag.db.models.documents import Document, DocumentChunk
 from airgap_rag.db.models.jobs import Job
+from airgap_rag.db.protocols import AsyncSessionProvider
 from airgap_rag.documents.types import DocumentStatus
 from airgap_rag.jobs.state_machine import transition_job
 from airgap_rag.jobs.types import JobStatus
@@ -84,3 +85,14 @@ class SQLAlchemyIndexingRepository:
 
     async def rollback(self) -> None:
         await self._session.rollback()
+
+
+class SessionChunkRepository:
+    """Loads retrieval chunks without holding a transaction during LLM inference."""
+
+    def __init__(self, database: AsyncSessionProvider) -> None:
+        self._database = database
+
+    async def get_chunks(self, chunk_ids: list[UUID]) -> dict[UUID, DocumentChunk]:
+        async with self._database.session() as session:
+            return await SQLAlchemyIndexingRepository(session).get_chunks(chunk_ids)

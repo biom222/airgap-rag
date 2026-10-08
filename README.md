@@ -6,7 +6,7 @@
 
 Проект разрабатывается поэтапно. Текущая версия включает foundation, приём
 документов, локальные embeddings, Qdrant indexing, Redis/Taskiq background jobs,
-debugging retrieval API и local LLM providers. RAG ещё не реализован.
+retrieval, reranking, local LLM providers и RAG API с citations.
 
 ## Текущие возможности
 
@@ -29,6 +29,9 @@ debugging retrieval API и local LLM providers. RAG ещё не реализов
 - `GET /api/v1/jobs/{job_id}` для наблюдения за ingestion;
 - `LLMProvider` с deterministic mock и Ollama adapter;
 - полная и streaming generation через локальный Ollama HTTP API;
+- optional lexical или local CrossEncoder reranking с сохранением vector score;
+- защищённый prompt builder, история диалога в PostgreSQL и server-derived citations;
+- `POST /api/v1/chat` для синхронного RAG-ответа;
 - Dockerfile и Docker Compose для API, worker, scheduler, PostgreSQL, Qdrant и Redis;
 - pytest, Ruff, mypy, pre-commit и GitHub Actions.
 
@@ -52,6 +55,7 @@ HTTP client
 Embeddings и vector indexing: [docs/vector-indexing.md](docs/vector-indexing.md).
 Background jobs: [docs/background-jobs.md](docs/background-jobs.md).
 Local LLM: [docs/local-llm.md](docs/local-llm.md).
+RAG pipeline: [docs/rag-pipeline.md](docs/rag-pipeline.md).
 
 ## Требования
 
@@ -147,7 +151,23 @@ curl -X POST http://localhost:8000/api/v1/retrieval/search \
 ```
 
 Можно передать `document_ids`. Ответ содержит текст из PostgreSQL, page,
-`chunk_id`, `chunk_index` и `vector_score`. Reranking появится позднее.
+`chunk_id`, `chunk_index`, `vector_score` и, если включён reranker,
+`rerank_score`.
+
+## Chat API
+
+Синхронный RAG-запрос:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Какой срок хранения договора?","document_ids":["<document_id>"]}'
+```
+
+Ответ содержит `answer`, новый `session_id` и массив `sources`. Повторный запрос
+с тем же `session_id` добавляет ограниченную историю разговора. Источники
+формируются сервером из реально переданных модели chunks, а не разбираются из
+текста LLM. SSE streaming будет добавлен отдельным этапом.
 
 ## Local embeddings
 
@@ -221,6 +241,12 @@ python -m pytest
 | `QDRANT_COLLECTION` | Collection для chunks | `document_chunks` |
 | `QDRANT_TIMEOUT_SECONDS` | Timeout Qdrant operations | `10` |
 | `RETRIEVAL_TOP_K` | Default retrieval limit | `10` |
+| `RERANKER_ENABLED` | Включить дополнительный reranking | `false` |
+| `RERANKER_PROVIDER` | `mock` или `cross_encoder` | `mock` |
+| `RERANKER_MODEL_NAME_OR_PATH` | Локальный путь к CrossEncoder | `models/rerankers/bge-reranker-v2-m3` |
+| `RERANKER_TOP_N` | Число chunks после reranking | `5` |
+| `RERANKER_BATCH_SIZE` | Batch для CrossEncoder | `16` |
+| `RERANKER_DEVICE` | Device reranker inference | `cpu` |
 | `REDIS_URL` | Redis для Taskiq broker и retry schedule | `redis://localhost:6379/0` |
 | `JOB_MAX_ATTEMPTS` | Максимальное число попыток ingestion | `3` |
 | `JOB_TIMEOUT_SECONDS` | Timeout одной попытки | `900` |
@@ -234,6 +260,8 @@ python -m pytest
 | `LLM_REQUEST_TIMEOUT_SECONDS` | Timeout generation request | `120` |
 | `LLM_TEMPERATURE` | Sampling temperature | `0.1` |
 | `LLM_MAX_TOKENS` | Максимум generated tokens | `1024` |
+| `RAG_CONTEXT_MAX_CHARACTERS` | Максимальный объём document context | `16000` |
+| `CHAT_HISTORY_MAX_MESSAGES` | Число прошлых сообщений в prompt | `10` |
 
 ## Структура
 
@@ -247,6 +275,8 @@ src/airgap_rag/embeddings/ embedding providers
 src/airgap_rag/vector_store/ Qdrant adapter
 src/airgap_rag/indexing/  indexing orchestration
 src/airgap_rag/retrieval/ retrieval service
+src/airgap_rag/reranking/ reranker contracts and adapters
+src/airgap_rag/rag/       prompt construction and RAG orchestration
 src/airgap_rag/jobs/      job state machine, broker and worker tasks
 src/airgap_rag/llm/       LLM provider contract, mock and Ollama adapter
 alembic/               database migrations
@@ -263,7 +293,8 @@ docs/                  Russian technical documentation and ADR
 - нет отдельной outbox-таблицы: если dispatch в Redis не удался, сохранённый
   `PENDING` job будет повторно отправлен при повторной загрузке того же файла;
 - Ollama model weights требуют отдельной ручной подготовки;
-- публичный chat endpoint и prompt builder появятся на RAG-этапе;
+- chat endpoint пока синхронный и не поддерживает SSE streaming;
+- prompt-injection защита уменьшает риск, но не даёт абсолютной гарантии;
 - реальная embedding model должна быть подготовлена отдельно.
 
 ## Roadmap
@@ -274,7 +305,7 @@ docs/                  Russian technical documentation and ADR
 - [x] Embeddings and Qdrant
 - [x] Background jobs
 - [x] Local LLM
-- [ ] RAG and citations
+- [x] RAG and citations
 - [ ] SSE streaming
 - [ ] Evaluation
 - [ ] Benchmarking

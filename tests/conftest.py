@@ -82,6 +82,7 @@ def settings() -> Settings:
     return Settings(
         app_env="test",
         database_url="postgresql+asyncpg://test:test@localhost:5432/test",
+        llm_provider="mock",
     )
 
 

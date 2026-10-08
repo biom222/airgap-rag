@@ -2,11 +2,9 @@
 
 ## Текущий этап
 
-На PHASE 5 реализованы foundation, documents boundary, embedding providers,
-Qdrant adapter, indexing orchestration, Redis/Taskiq background jobs и retrieval
-debugging endpoint, а также local LLM provider boundary и Ollama adapter.
-
-Reranking и RAG пока являются запланированными границами.
+На PHASE 6 реализованы foundation, ingestion, indexing, background jobs,
+retrieval, optional reranking, local LLM provider boundary и синхронный RAG API
+с историей диалога и server-derived citations.
 
 ## Направление зависимостей
 
@@ -124,7 +122,7 @@ Taskiq использует acknowledgements и допускает повтор�
 ## Local LLM boundary
 
 ```text
-future RAG service
+RAGService
     -> LLMProvider
         -> MockLLMProvider
         -> OllamaProvider
@@ -132,7 +130,29 @@ future RAG service
 ```
 
 Provider поддерживает полный ответ и async token stream. Prompt construction не
-смешивается с runtime adapter и будет добавлен вместе с RAG. Ollama запускается
-опционально; приложение не скачивает model weights автоматически.
+смешивается с runtime adapter. Ollama запускается опционально; приложение не
+скачивает model weights автоматически.
 
 Подробнее: [local-llm.md](local-llm.md).
+
+## RAG boundary
+
+```text
+POST /api/v1/chat
+    -> session history from PostgreSQL
+    -> embedding query
+    -> Qdrant top-K
+    -> authoritative chunk text from PostgreSQL
+    -> optional local reranker -> top-N
+    -> PromptBuilder
+    -> LLMProvider.generate
+    -> persist exchange
+    -> answer + server-derived sources
+```
+
+Document content помещается в отдельный JSON context и явно обозначается как
+недоверенные данные. `sources` строятся из chunks, выбранных PromptBuilder, и не
+зависят от того, правильно ли LLM напечатала маркеры `[S1]`. История хранится в
+`chat_sessions` и `chat_messages`; вызов модели не удерживает транзакцию БД.
+
+Подробнее: [rag-pipeline.md](rag-pipeline.md).

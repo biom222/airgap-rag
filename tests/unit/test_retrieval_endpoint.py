@@ -21,8 +21,10 @@ class StubRetrievalService(RetrievalService):
         question: str,
         *,
         top_k: int,
+        top_n: int | None = None,
         document_ids: list[UUID] | None = None,
     ) -> list[RetrievedChunk]:
+        del top_n
         self.received_top_k = top_k
         return [self.result]
 
@@ -64,6 +66,7 @@ async def test_retrieval_endpoint_returns_debug_metadata(settings: Settings) -> 
     assert response.status_code == 200
     assert response.json()["results"][0]["filename"] == "policy.pdf"
     assert response.json()["results"][0]["vector_score"] == 0.93
+    assert response.json()["results"][0]["rerank_score"] is None
     assert service.received_top_k == 4
 
 

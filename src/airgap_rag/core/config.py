@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     qdrant_collection: str = "document_chunks"
     qdrant_timeout_seconds: int = Field(default=10, gt=0)
     retrieval_top_k: int = Field(default=10, ge=1, le=100)
+    reranker_enabled: bool = False
+    reranker_provider: Literal["mock", "cross_encoder"] = "mock"
+    reranker_model_name_or_path: str = "models/rerankers/bge-reranker-v2-m3"
+    reranker_top_n: int = Field(default=5, ge=1, le=100)
+    reranker_batch_size: int = Field(default=16, ge=1)
+    reranker_device: str = "cpu"
 
     redis_url: str = "redis://localhost:6379/0"
     job_max_attempts: int = Field(default=3, ge=1, le=20)
@@ -62,6 +68,8 @@ class Settings(BaseSettings):
     llm_request_timeout_seconds: float = Field(default=120.0, gt=0)
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1024, ge=1)
+    rag_context_max_characters: int = Field(default=16_000, ge=1_000)
+    chat_history_max_messages: int = Field(default=10, ge=0, le=100)
 
     @field_validator("database_url")
     @classmethod
@@ -116,6 +124,8 @@ class Settings(BaseSettings):
             )
         if self.job_stale_after_seconds <= self.job_timeout_seconds:
             raise ValueError("JOB_STALE_AFTER_SECONDS must be greater than JOB_TIMEOUT_SECONDS")
+        if self.reranker_top_n > self.retrieval_top_k:
+            raise ValueError("RERANKER_TOP_N must not exceed RETRIEVAL_TOP_K")
         return self
 
 

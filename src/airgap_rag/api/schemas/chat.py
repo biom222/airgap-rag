@@ -1,13 +1,12 @@
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
-class RetrievalSearchRequest(BaseModel):
+class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
+    session_id: UUID | None = None
     document_ids: list[UUID] | None = None
-    top_k: int | None = Field(default=None, ge=1, le=100)
-    top_n: int | None = Field(default=None, ge=1, le=100)
 
     @field_validator("question")
     @classmethod
@@ -18,18 +17,16 @@ class RetrievalSearchRequest(BaseModel):
         return stripped
 
 
-class RetrievedChunkResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
+class ChatSourceResponse(BaseModel):
     document_id: UUID
     filename: str
     page: int | None
     chunk_id: UUID
-    chunk_index: int
-    text: str
-    vector_score: float
+    score: float
     rerank_score: float | None
 
 
-class RetrievalSearchResponse(BaseModel):
-    results: list[RetrievedChunkResponse]
+class ChatResponse(BaseModel):
+    answer: str
+    session_id: UUID
+    sources: list[ChatSourceResponse]
