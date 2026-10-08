@@ -4,6 +4,13 @@ x-app-environment: &app-environment
   DOCUMENT_STORAGE_PATH: /data/documents
   EMBEDDING_PROVIDER: mock
   LOG_LEVEL: INFO
+  LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
+  LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
   QDRANT_URL: http://qdrant:6333
   REDIS_URL: redis://redis:6379/0
 
@@ -110,8 +117,22 @@ services:
       timeout: 3s
       retries: 10
 
+  ollama:
+    image: ollama/ollama:0.12.11
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   postgres_data:
   document_data:
   qdrant_data:
   redis_data:
+  ollama_data:

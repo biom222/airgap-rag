@@ -2,11 +2,11 @@
 
 ## Текущий этап
 
-На PHASE 4 реализованы foundation, documents boundary, embedding providers,
+На PHASE 5 реализованы foundation, documents boundary, embedding providers,
 Qdrant adapter, indexing orchestration, Redis/Taskiq background jobs и retrieval
-debugging endpoint.
+debugging endpoint, а также local LLM provider boundary и Ollama adapter.
 
-LLM, reranking и RAG пока являются запланированными границами.
+Reranking и RAG пока являются запланированными границами.
 
 ## Направление зависимостей
 
@@ -26,7 +26,7 @@ Qdrant, Redis и model runtimes будет изолирована в adapters.
 
 ## Процессы
 
-Одна кодовая база имеет три точки запуска:
+Одна кодовая база имеет три собственные точки запуска:
 
 - API process принимает HTTP и SSE requests;
 - worker process выполняет parsing, embeddings и indexing.
@@ -35,14 +35,17 @@ Qdrant, Redis и model runtimes будет изолирована в adapters.
 Это разделение процессов не превращает приложение в набор микросервисов:
 deployment, domain model и repository остаются общими.
 
+Ollama является отдельным инфраструктурным runtime, доступным через локальный
+HTTP API. `LLMProvider` изолирует application layer от его wire protocol.
+
 ## Проверки состояния
 
 `/health` является liveness probe. Он подтверждает, что процесс способен
 обработать HTTP request, и не зависит от PostgreSQL.
 
-`/ready` является readiness probe. Сейчас он выполняет `SELECT 1` через async
-SQLAlchemy connection. Недоступность PostgreSQL даёт HTTP 503, но не завершает
-процесс API.
+`/ready` является readiness probe. Он проверяет PostgreSQL, embedding provider,
+Qdrant и LLM provider. Для Ollama проверка включает наличие настроенной модели.
+Недоступность зависимости даёт HTTP 503, но не завершает процесс API.
 
 ## Управление schema
 
@@ -117,3 +120,19 @@ Taskiq использует acknowledgements и допускает повтор�
 только после `JOB_STALE_AFTER_SECONDS`.
 
 Подробнее: [background-jobs.md](background-jobs.md).
+
+## Local LLM boundary
+
+```text
+future RAG service
+    -> LLMProvider
+        -> MockLLMProvider
+        -> OllamaProvider
+            -> local Ollama /api/chat
+```
+
+Provider поддерживает полный ответ и async token stream. Prompt construction не
+смешивается с runtime adapter и будет добавлен вместе с RAG. Ollama запускается
+опционально; приложение не скачивает model weights автоматически.
+
+Подробнее: [local-llm.md](local-llm.md).

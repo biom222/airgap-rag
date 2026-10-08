@@ -2,6 +2,7 @@ from httpx import ASGITransport, AsyncClient
 
 from airgap_rag.core.config import Settings
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
+from airgap_rag.llm.mock import MockLLMProvider
 from airgap_rag.main import create_app
 from tests.conftest import FakeDatabase, FakeJobPublisher, FakeVectorStore
 
@@ -26,7 +27,7 @@ async def test_ready_returns_ready_when_database_is_available(client: AsyncClien
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "checks": {"database": "ok", "embeddings": "ok", "qdrant": "ok"},
+        "checks": {"database": "ok", "embeddings": "ok", "qdrant": "ok", "llm": "ok"},
     }
 
 
@@ -49,7 +50,12 @@ async def test_ready_returns_503_when_database_is_unavailable(settings: Settings
     assert response.status_code == 503
     assert response.json() == {
         "status": "not_ready",
-        "checks": {"database": "unavailable", "embeddings": "ok", "qdrant": "ok"},
+        "checks": {
+            "database": "unavailable",
+            "embeddings": "ok",
+            "qdrant": "ok",
+            "llm": "ok",
+        },
     }
 
 
@@ -71,5 +77,43 @@ async def test_ready_returns_503_when_qdrant_is_unavailable(settings: Settings) 
     assert response.status_code == 503
     assert response.json() == {
         "status": "not_ready",
-        "checks": {"database": "ok", "embeddings": "ok", "qdrant": "unavailable"},
+        "checks": {
+            "database": "ok",
+            "embeddings": "ok",
+            "qdrant": "unavailable",
+            "llm": "ok",
+        },
+    }
+
+
+class UnhealthyLLMProvider(MockLLMProvider):
+    async def healthcheck(self) -> bool:
+        return False
+
+
+async def test_ready_returns_503_when_llm_is_unavailable(settings: Settings) -> None:
+    application = create_app(
+        settings=settings,
+        database=FakeDatabase(),
+        embedding_provider=MockEmbeddingProvider(8),
+        vector_store=FakeVectorStore(),
+        job_publisher=FakeJobPublisher(),
+        llm_provider=UnhealthyLLMProvider(),
+    )
+    async with application.router.lifespan_context(application):
+        async with AsyncClient(
+            transport=ASGITransport(app=application),
+            base_url="http://test",
+        ) as test_client:
+            response = await test_client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "checks": {
+            "database": "ok",
+            "embeddings": "ok",
+            "qdrant": "ok",
+            "llm": "unavailable",
+        },
     }

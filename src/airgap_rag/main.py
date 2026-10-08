@@ -13,6 +13,7 @@ from airgap_rag.core.logging import configure_logging
 from airgap_rag.db.session import Database
 from airgap_rag.embeddings.base import EmbeddingProvider
 from airgap_rag.jobs.service import JobPublisher
+from airgap_rag.llm.base import LLMProvider
 from airgap_rag.vector_store.base import VectorStore
 
 
@@ -23,6 +24,7 @@ def create_app(
     vector_store: VectorStore | None = None,
     job_publisher: JobPublisher | None = None,
     task_broker: TaskBroker | None = None,
+    llm_provider: LLMProvider | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     configure_logging(resolved_settings.log_level)
@@ -46,6 +48,7 @@ def create_app(
             vector_store,
             resolved_job_publisher,
             resolved_task_broker,
+            llm_provider,
         ),
     )
     application.add_middleware(RequestContextMiddleware)

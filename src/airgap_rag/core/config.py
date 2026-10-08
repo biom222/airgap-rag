@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     job_retry_max_delay_seconds: int = Field(default=60, ge=1)
     job_stale_after_seconds: int = Field(default=960, ge=1)
 
+    llm_provider: Literal["mock", "ollama"] = "mock"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:7b"
+    ollama_keep_alive: str = "5m"
+    llm_request_timeout_seconds: float = Field(default=120.0, gt=0)
+    llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    llm_max_tokens: int = Field(default=1024, ge=1)
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, value: str) -> str:
@@ -81,6 +89,20 @@ class Settings(BaseSettings):
     def validate_redis_url(cls, value: str) -> str:
         if not value.startswith(("redis://", "rediss://")):
             raise ValueError("REDIS_URL must use the redis or rediss scheme")
+        return value
+
+    @field_validator("ollama_base_url")
+    @classmethod
+    def validate_ollama_base_url(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("OLLAMA_BASE_URL must use the http or https scheme")
+        return value.rstrip("/")
+
+    @field_validator("ollama_model", "ollama_keep_alive")
+    @classmethod
+    def validate_non_empty_llm_settings(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("LLM model and keep-alive settings must not be empty")
         return value
 
     @model_validator(mode="after")

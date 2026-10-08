@@ -33,6 +33,7 @@ async def ready(request: Request) -> ReadinessResponse | JSONResponse:
     database = cast(PingableDatabase, request.app.state.database)
     embedding_provider = cast(HealthcheckDependency, request.app.state.embedding_provider)
     vector_store = cast(HealthcheckDependency, request.app.state.vector_store)
+    llm_provider = cast(HealthcheckDependency, request.app.state.llm_provider)
 
     async def database_healthcheck() -> bool:
         try:
@@ -43,21 +44,23 @@ async def ready(request: Request) -> ReadinessResponse | JSONResponse:
         return True
 
     try:
-        database_ok, embeddings_ok, qdrant_ok = await asyncio.gather(
+        database_ok, embeddings_ok, qdrant_ok, llm_ok = await asyncio.gather(
             database_healthcheck(),
             embedding_provider.healthcheck(),
             vector_store.healthcheck(),
+            llm_provider.healthcheck(),
         )
     except Exception as exc:  # Defensive boundary for provider contract violations.
         logger.error("readiness_check_failed", extra={"error_type": type(exc).__name__})
-        database_ok, embeddings_ok, qdrant_ok = False, False, False
+        database_ok, embeddings_ok, qdrant_ok, llm_ok = False, False, False, False
 
     checks = {
         "database": "ok" if database_ok else "unavailable",
         "embeddings": "ok" if embeddings_ok else "unavailable",
         "qdrant": "ok" if qdrant_ok else "unavailable",
+        "llm": "ok" if llm_ok else "unavailable",
     }
-    if not all((database_ok, embeddings_ok, qdrant_ok)):
+    if not all((database_ok, embeddings_ok, qdrant_ok, llm_ok)):
         payload = ReadinessResponse(status="not_ready", checks=checks)
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
