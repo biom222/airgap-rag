@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
@@ -29,3 +30,22 @@ class RAGAnswer:
     answer: str
     session_id: UUID
     sources: tuple[Citation, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RAGStreamToken:
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class RAGStreamDone:
+    session_id: UUID
+
+
+RAGStreamEvent = RAGStreamToken | RAGStreamDone
+
+
+@dataclass(frozen=True, slots=True)
+class RAGStream:
+    sources: tuple[Citation, ...]
+    events: AsyncIterator[RAGStreamEvent]

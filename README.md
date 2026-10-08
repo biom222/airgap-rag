@@ -32,6 +32,7 @@ retrieval, reranking, local LLM providers и RAG API с citations.
 - optional lexical или local CrossEncoder reranking с сохранением vector score;
 - защищённый prompt builder, история диалога в PostgreSQL и server-derived citations;
 - `POST /api/v1/chat` для синхронного RAG-ответа;
+- `POST /api/v1/chat/stream` для SSE streaming с обработкой disconnect;
 - Dockerfile и Docker Compose для API, worker, scheduler, PostgreSQL, Qdrant и Redis;
 - pytest, Ruff, mypy, pre-commit и GitHub Actions.
 
@@ -56,6 +57,7 @@ Embeddings и vector indexing: [docs/vector-indexing.md](docs/vector-indexing.md
 Background jobs: [docs/background-jobs.md](docs/background-jobs.md).
 Local LLM: [docs/local-llm.md](docs/local-llm.md).
 RAG pipeline: [docs/rag-pipeline.md](docs/rag-pipeline.md).
+SSE streaming: [docs/sse-streaming.md](docs/sse-streaming.md).
 
 ## Требования
 
@@ -167,7 +169,19 @@ curl -X POST http://localhost:8000/api/v1/chat \
 Ответ содержит `answer`, новый `session_id` и массив `sources`. Повторный запрос
 с тем же `session_id` добавляет ограниченную историю разговора. Источники
 формируются сервером из реально переданных модели chunks, а не разбираются из
-текста LLM. SSE streaming будет добавлен отдельным этапом.
+текста LLM.
+
+Streaming использует тот же request body:
+
+```bash
+curl -N -X POST http://localhost:8000/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Какой срок хранения договора?","document_ids":["<document_id>"]}'
+```
+
+Порядок SSE events: `sources`, один или несколько `token`, затем `done` с
+`session_id`. Ошибка после открытия потока передаётся событием `error`. При
+disconnect upstream generation закрывается, а частичный ответ не сохраняется.
 
 ## Local embeddings
 
@@ -293,7 +307,6 @@ docs/                  Russian technical documentation and ADR
 - нет отдельной outbox-таблицы: если dispatch в Redis не удался, сохранённый
   `PENDING` job будет повторно отправлен при повторной загрузке того же файла;
 - Ollama model weights требуют отдельной ручной подготовки;
-- chat endpoint пока синхронный и не поддерживает SSE streaming;
 - prompt-injection защита уменьшает риск, но не даёт абсолютной гарантии;
 - реальная embedding model должна быть подготовлена отдельно.
 
@@ -306,7 +319,7 @@ docs/                  Russian technical documentation and ADR
 - [x] Background jobs
 - [x] Local LLM
 - [x] RAG and citations
-- [ ] SSE streaming
+- [x] SSE streaming
 - [ ] Evaluation
 - [ ] Benchmarking
 - [ ] Observability

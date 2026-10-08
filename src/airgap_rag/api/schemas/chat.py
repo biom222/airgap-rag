@@ -30,3 +30,21 @@ class ChatResponse(BaseModel):
     answer: str
     session_id: UUID
     sources: list[ChatSourceResponse]
+
+
+class ChatSourcesEvent(BaseModel):
+    sources: list[ChatSourceResponse]
+
+
+class ChatTokenEvent(BaseModel):
+    text: str
+
+
+class ChatDoneEvent(BaseModel):
+    session_id: UUID
+
+
+class ChatErrorEvent(BaseModel):
+    code: str
+    message: str
+    request_id: str

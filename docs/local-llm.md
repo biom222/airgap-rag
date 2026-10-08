@@ -28,7 +28,8 @@ HTTP-клиент и формат wire response остаются внутри ad
 - `GET /api/tags` для проверки runtime и наличия настроенной модели.
 
 Provider различает недоступный runtime, отсутствующую модель и некорректный
-ответ. Эти ошибки станут частью HTTP-контракта chat API на следующем этапе.
+ответ. Обычный chat endpoint преобразует их в HTTP errors, а уже открытый SSE
+stream — в событие `error`.
 
 ## Подготовка Ollama
 
@@ -70,13 +71,13 @@ runtime недоступен или модель отсутствует, `/ready
 - `LLM_REQUEST_TIMEOUT_SECONDS` — HTTP timeout с учётом медленного CPU inference;
 - `OLLAMA_KEEP_ALIVE` — время удержания модели в памяти runtime.
 
-Prompt builder намеренно не входит в этот этап. System prompt, context и защита
-от prompt injection будут добавлены в RAG boundary на PHASE 6.
+Prompt builder находится в RAG boundary и передаёт provider уже готовую
+последовательность сообщений.
 
 ## Ограничения
 
 - model weights не входят в repository и Docker image;
 - readiness проверяет наличие модели, но не запускает пробную генерацию;
-- в PHASE 5 нет публичного generation endpoint;
-- cancellation полного ответа будет связываться с HTTP request на PHASE 6;
-- SSE и обработка disconnect относятся к PHASE 7.
+- синхронный endpoint не может прервать уже отправленный upstream request после
+  disconnect клиента;
+- SSE boundary закрывает provider stream при disconnect клиента.

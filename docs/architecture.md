@@ -2,9 +2,9 @@
 
 ## Текущий этап
 
-На PHASE 6 реализованы foundation, ingestion, indexing, background jobs,
-retrieval, optional reranking, local LLM provider boundary и синхронный RAG API
-с историей диалога и server-derived citations.
+На PHASE 7 реализованы foundation, ingestion, indexing, background jobs,
+retrieval, optional reranking, local LLM provider boundary, RAG API и SSE
+streaming с обработкой disconnect.
 
 ## Направление зависимостей
 
@@ -148,11 +148,21 @@ POST /api/v1/chat
     -> LLMProvider.generate
     -> persist exchange
     -> answer + server-derived sources
+
+POST /api/v1/chat/stream
+    -> same preparation pipeline
+    -> sources SSE event
+    -> LLMProvider.stream -> token SSE events
+    -> persist completed exchange
+    -> done SSE event with session_id
 ```
 
 Document content помещается в отдельный JSON context и явно обозначается как
 недоверенные данные. `sources` строятся из chunks, выбранных PromptBuilder, и не
 зависят от того, правильно ли LLM напечатала маркеры `[S1]`. История хранится в
 `chat_sessions` и `chat_messages`; вызов модели не удерживает транзакцию БД.
+Streaming response проверяет disconnect между events и закрывает provider
+iterator. Частичная генерация не сохраняется.
 
 Подробнее: [rag-pipeline.md](rag-pipeline.md).
+Формат потока: [sse-streaming.md](sse-streaming.md).

@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from uuid import UUID, uuid4
 
 import pytest
@@ -7,7 +7,7 @@ from airgap_rag.llm.base import LLMMessage, LLMUnavailableError
 from airgap_rag.rag.errors import ChatSessionNotFoundError, LLMServiceUnavailableError
 from airgap_rag.rag.prompting import PromptBuilder
 from airgap_rag.rag.service import INSUFFICIENT_CONTEXT_ANSWER, RAGService
-from airgap_rag.rag.types import ChatHistoryMessage
+from airgap_rag.rag.types import ChatHistoryMessage, RAGStreamDone, RAGStreamToken
 from airgap_rag.retrieval.service import RetrievalService, RetrievedChunk
 
 
@@ -54,9 +54,19 @@ class FakeChatRepository:
 
 
 class RecordingLLMProvider:
-    def __init__(self, response: str = "Answer [S1]", error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        response: str = "Answer [S1]",
+        error: Exception | None = None,
+        *,
+        stream_parts: list[str] | None = None,
+        stream_error: Exception | None = None,
+    ) -> None:
         self.response = response
         self.error = error
+        self.stream_parts = stream_parts or [response]
+        self.stream_error = stream_error
+        self.stream_closed = False
         self.messages: Sequence[LLMMessage] = []
 
     async def generate(self, messages: Sequence[LLMMessage]) -> str:
@@ -66,8 +76,14 @@ class RecordingLLMProvider:
         return self.response
 
     async def stream(self, messages: Sequence[LLMMessage]) -> AsyncIterator[str]:
-        del messages
-        yield self.response
+        self.messages = messages
+        try:
+            for part in self.stream_parts:
+                yield part
+            if self.stream_error is not None:
+                raise self.stream_error
+        finally:
+            self.stream_closed = True
 
     async def healthcheck(self) -> bool:
         return True
@@ -176,3 +192,122 @@ async def test_rag_answer_maps_llm_unavailable_error() -> None:
             top_k=10,
             top_n=5,
         )
+
+
+async def test_rag_stream_returns_tokens_then_persists_completed_exchange() -> None:
+    chunk = RetrievedChunk(
+        document_id=uuid4(),
+        filename="policy.pdf",
+        page=2,
+        chunk_id=uuid4(),
+        chunk_index=0,
+        text="The answer is five years.",
+        vector_score=0.9,
+    )
+    repository = FakeChatRepository(history=[])
+    llm = RecordingLLMProvider(stream_parts=["Five ", "years [S1]"])
+    service = make_service([chunk], repository, llm)
+
+    stream = await service.stream_answer(
+        "How long?",
+        session_id=None,
+        document_ids=[chunk.document_id],
+        top_k=10,
+        top_n=5,
+    )
+    events = [event async for event in stream.events]
+
+    assert stream.sources[0].chunk_id == chunk.chunk_id
+    assert events == [
+        RAGStreamToken("Five "),
+        RAGStreamToken("years [S1]"),
+        RAGStreamDone(repository.created_session_id),
+    ]
+    assert repository.saved == [(None, "How long?", "Five years [S1]")]
+    assert llm.stream_closed is True
+
+
+async def test_rag_stream_cancellation_closes_provider_without_persisting() -> None:
+    chunk = RetrievedChunk(
+        document_id=uuid4(),
+        filename="policy.pdf",
+        page=1,
+        chunk_id=uuid4(),
+        chunk_index=0,
+        text="Context",
+        vector_score=0.9,
+    )
+    repository = FakeChatRepository(history=[])
+    llm = RecordingLLMProvider(stream_parts=["first", "second"])
+    service = make_service([chunk], repository, llm)
+    result = await service.stream_answer(
+        "Question",
+        session_id=None,
+        document_ids=None,
+        top_k=10,
+        top_n=5,
+    )
+    events = result.events
+
+    assert await anext(events) == RAGStreamToken("first")
+    assert isinstance(events, AsyncGenerator)
+    await events.aclose()
+
+    assert llm.stream_closed is True
+    assert repository.saved == []
+
+
+async def test_rag_stream_maps_provider_error_and_does_not_persist() -> None:
+    chunk = RetrievedChunk(
+        document_id=uuid4(),
+        filename="policy.pdf",
+        page=1,
+        chunk_id=uuid4(),
+        chunk_index=0,
+        text="Context",
+        vector_score=0.9,
+    )
+    repository = FakeChatRepository(history=[])
+    llm = RecordingLLMProvider(
+        stream_parts=["partial"],
+        stream_error=LLMUnavailableError("offline"),
+    )
+    service = make_service([chunk], repository, llm)
+    result = await service.stream_answer(
+        "Question",
+        session_id=None,
+        document_ids=None,
+        top_k=10,
+        top_n=5,
+    )
+
+    with pytest.raises(LLMServiceUnavailableError):
+        _ = [event async for event in result.events]
+
+    assert llm.stream_closed is True
+    assert repository.saved == []
+
+
+async def test_rag_stream_without_context_uses_fallback_and_persists() -> None:
+    repository = FakeChatRepository(history=[])
+    service = make_service(
+        [],
+        repository,
+        RecordingLLMProvider(error=AssertionError("LLM must not be called")),
+    )
+
+    result = await service.stream_answer(
+        "Unknown?",
+        session_id=None,
+        document_ids=None,
+        top_k=10,
+        top_n=5,
+    )
+    events = [event async for event in result.events]
+
+    assert result.sources == ()
+    assert events == [
+        RAGStreamToken(INSUFFICIENT_CONTEXT_ANSWER),
+        RAGStreamDone(repository.created_session_id),
+    ]
+    assert repository.saved == [(None, "Unknown?", INSUFFICIENT_CONTEXT_ANSWER)]

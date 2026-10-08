@@ -51,4 +51,14 @@ Document chunks сериализуются в JSON и явно помечают�
 - некорректный/пустой ответ provider возвращает HTTP 502;
 - отсутствие найденного контекста даёт детерминированный ответ без вызова LLM.
 
-Streaming намеренно не входит в этот этап и будет реализован через SSE отдельно.
+## Streaming
+
+`POST /api/v1/chat/stream` повторно использует preparation часть обычного RAG
+pipeline. Retrieval, history validation и prompt construction завершаются до
+открытия потока. Далее `LLMProvider.stream` отдаёт токены через SSE.
+
+Exchange сохраняется только после полного завершения provider stream. При
+disconnect iterator закрывается, Ollama HTTP response освобождается, а частичный
+ответ не попадает в историю.
+
+Подробности протокола: [sse-streaming.md](sse-streaming.md).
