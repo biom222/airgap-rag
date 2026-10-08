@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tmp/
+tests/.runtime/
+.coverage
+coverage.xml
+htmlcov/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Runtime data
+logs/
+data/
+models/
+cache/
+artifacts/
+offline_bundle/models/
+offline_bundle/wheels/
+offline_bundle/docker-images/
+qdrant_storage/
+postgres_data/
+redis_data/
+*.rdb
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# Benchmarks and generated reports
+benchmarks/results/
+evaluation/results/
+
+# Local user documents
+documents/
+uploads/
+
+# Codex workspace helpers
+work/
+outputs/
