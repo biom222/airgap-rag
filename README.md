@@ -183,6 +183,21 @@ curl -N -X POST http://localhost:8000/api/v1/chat/stream \
 `session_id`. Ошибка после открытия потока передаётся событием `error`. При
 disconnect upstream generation закрывается, а частичный ответ не сохраняется.
 
+## Evaluation
+
+Retrieval evaluation использует версионируемый JSONL dataset с вопросами и
+релевантными `chunk_id`. CLI вызывает реальный retrieval endpoint, считает
+`Hit@K` и ограниченный глубиной поиска `MRR@max(K)`, затем сохраняет JSON и
+Markdown reports:
+
+```bash
+python -m airgap_rag.evaluation evaluation/datasets/retrieval.jsonl \
+  --top-k 1 3 5 10
+```
+
+Формат разметки, правила интерпретации метрик и ограничения описаны в
+[docs/evaluation.md](docs/evaluation.md).
+
 ## Local embeddings
 
 По умолчанию используется deterministic `MockEmbeddingProvider`, который нужен
@@ -291,6 +306,7 @@ src/airgap_rag/indexing/  indexing orchestration
 src/airgap_rag/retrieval/ retrieval service
 src/airgap_rag/reranking/ reranker contracts and adapters
 src/airgap_rag/rag/       prompt construction and RAG orchestration
+src/airgap_rag/evaluation/ retrieval quality metrics, API client and reports
 src/airgap_rag/jobs/      job state machine, broker and worker tasks
 src/airgap_rag/llm/       LLM provider contract, mock and Ollama adapter
 alembic/               database migrations
@@ -320,7 +336,7 @@ docs/                  Russian technical documentation and ADR
 - [x] Local LLM
 - [x] RAG and citations
 - [x] SSE streaming
-- [ ] Evaluation
+- [x] Evaluation
 - [ ] Benchmarking
 - [ ] Observability
 - [ ] Air-gapped deployment

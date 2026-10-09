@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test run migrate compose-up compose-down
+.PHONY: install lint format typecheck test evaluate run migrate compose-up compose-down
 
 install:
 	python -m pip install -e ".[dev]"
@@ -17,6 +17,9 @@ typecheck:
 test:
 	python -m pytest
 
+evaluate:
+	python -m airgap_rag.evaluation $(DATASET)
+
 run:
 	python -m uvicorn airgap_rag.main:app --reload
 
@@ -28,4 +31,3 @@ compose-up:
 
 compose-down:
 	docker compose down
-
