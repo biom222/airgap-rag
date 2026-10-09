@@ -33,7 +33,7 @@ Thumbs.db
 # Runtime data
 logs/
 data/
-models/
+/models/
 cache/
 artifacts/
 offline_bundle/models/
