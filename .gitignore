@@ -54,7 +54,7 @@ benchmarks/results/
 evaluation/results/
 
 # Local user documents
-documents/
+/documents/
 uploads/
 
 # Codex workspace helpers
