@@ -21,6 +21,22 @@ async def test_health_preserves_client_request_id(client: AsyncClient) -> None:
     assert response.headers["X-Request-ID"] == "request-from-client"
 
 
+async def test_system_info_reports_runtime_and_selected_providers(client: AsyncClient) -> None:
+    response = await client.get("/system/info")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["hardware"]["python_version"]
+    assert payload["hardware"]["logical_cpu_count"] >= 1
+    assert payload["hardware"]["ram_total_mb"] > 0
+    assert payload["llm_provider"] == "mock"
+    assert payload["llm_model"] == "mock"
+    assert payload["embedding_provider"] == "mock"
+    assert payload["embedding_model"] == "mock:384"
+    assert payload["reranker"] is None
+    assert payload["airgap_mode"] is True
+
+
 async def test_ready_returns_ready_when_database_is_available(client: AsyncClient) -> None:
     response = await client.get("/ready")
 

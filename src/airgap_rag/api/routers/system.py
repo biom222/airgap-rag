@@ -1,11 +1,14 @@
 import asyncio
 import logging
+from dataclasses import asdict
 from typing import Protocol, cast
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 
-from airgap_rag.api.schemas.system import HealthResponse, ReadinessResponse
+from airgap_rag.api.schemas.system import HealthResponse, ReadinessResponse, SystemInfoResponse
+from airgap_rag.core.config import Settings
+from airgap_rag.system_info import collect_hardware_info
 
 router = APIRouter(tags=["system"])
 logger = logging.getLogger(__name__)
@@ -22,6 +25,33 @@ class HealthcheckDependency(Protocol):
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse()
+
+
+@router.get("/system/info", response_model=SystemInfoResponse)
+async def system_info(request: Request) -> SystemInfoResponse:
+    settings = cast(Settings, request.app.state.settings)
+    hardware = collect_hardware_info()
+    embedding_model = (
+        settings.embedding_model_name_or_path
+        if settings.embedding_provider == "sentence_transformer"
+        else f"mock:{settings.embedding_dimension}"
+    )
+    reranker = None
+    if settings.reranker_enabled:
+        reranker = (
+            settings.reranker_model_name_or_path
+            if settings.reranker_provider == "cross_encoder"
+            else "mock"
+        )
+    return SystemInfoResponse(
+        hardware=asdict(hardware),
+        llm_provider=settings.llm_provider,
+        llm_model=settings.ollama_model if settings.llm_provider == "ollama" else "mock",
+        embedding_provider=settings.embedding_provider,
+        embedding_model=embedding_model,
+        reranker=reranker,
+        airgap_mode=settings.airgap_mode,
+    )
 
 
 @router.get(

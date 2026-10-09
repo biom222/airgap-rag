@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test evaluate run migrate compose-up compose-down
+.PHONY: install lint format typecheck test evaluate benchmark-llm benchmark-rag run migrate compose-up compose-down
 
 install:
 	python -m pip install -e ".[dev]"
@@ -19,6 +19,12 @@ test:
 
 evaluate:
 	python -m airgap_rag.evaluation $(DATASET)
+
+benchmark-llm:
+	python -m benchmarks.llm $(ARGS)
+
+benchmark-rag:
+	python -m benchmarks.rag $(ARGS)
 
 run:
 	python -m uvicorn airgap_rag.main:app --reload

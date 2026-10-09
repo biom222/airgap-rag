@@ -15,6 +15,7 @@ retrieval, reranking, local LLM providers и RAG API с citations.
 - структурированные JSON logs и `request_id`;
 - `GET /health` для liveness;
 - `GET /ready` с проверкой PostgreSQL, embeddings, Qdrant и LLM;
+- `GET /system/info` с аппаратной конфигурацией и выбранными AI providers;
 - async SQLAlchemy engine и `AsyncSession` factory;
 - модели `Document` и `DocumentChunk`, управляемые Alembic;
 - загрузка PDF, DOCX и UTF-8 TXT с ограничением размера;
@@ -34,6 +35,7 @@ retrieval, reranking, local LLM providers и RAG API с citations.
 - `POST /api/v1/chat` для синхронного RAG-ответа;
 - `POST /api/v1/chat/stream` для SSE streaming с обработкой disconnect;
 - Dockerfile и Docker Compose для API, worker, scheduler, PostgreSQL, Qdrant и Redis;
+- воспроизводимые LLM и RAG benchmarks с JSON-отчётами;
 - pytest, Ruff, mypy, pre-commit и GitHub Actions.
 
 ## Архитектура
@@ -58,6 +60,8 @@ Background jobs: [docs/background-jobs.md](docs/background-jobs.md).
 Local LLM: [docs/local-llm.md](docs/local-llm.md).
 RAG pipeline: [docs/rag-pipeline.md](docs/rag-pipeline.md).
 SSE streaming: [docs/sse-streaming.md](docs/sse-streaming.md).
+Бенчмарки: [docs/benchmarking.md](docs/benchmarking.md).
+Квантизация: [docs/quantization.md](docs/quantization.md).
 
 ## Требования
 
@@ -198,6 +202,20 @@ python -m airgap_rag.evaluation evaluation/datasets/retrieval.jsonl \
 Формат разметки, правила интерпретации метрик и ограничения описаны в
 [docs/evaluation.md](docs/evaluation.md).
 
+## Benchmarking
+
+LLM и полный RAG pipeline измеряются отдельными CLI. Результаты сохраняются в
+игнорируемые Git JSON-файлы, а LLM samples при необходимости — в PostgreSQL:
+
+```bash
+python -m benchmarks.llm --model qwen2.5:7b --quantization Q4_K_M
+python -m benchmarks.rag --question "Какой срок хранения договора?"
+```
+
+Параметры запуска и правила сравнения описаны в
+[docs/benchmarking.md](docs/benchmarking.md). Числа не включены в документацию,
+пока соответствующий benchmark реально не выполнен.
+
 ## Local embeddings
 
 По умолчанию используется deterministic `MockEmbeddingProvider`, который нужен
@@ -307,6 +325,8 @@ src/airgap_rag/retrieval/ retrieval service
 src/airgap_rag/reranking/ reranker contracts and adapters
 src/airgap_rag/rag/       prompt construction and RAG orchestration
 src/airgap_rag/evaluation/ retrieval quality metrics, API client and reports
+src/airgap_rag/benchmarks/ LLM и RAG benchmark runners
+benchmarks/             CLI entry points и локальные результаты
 src/airgap_rag/jobs/      job state machine, broker and worker tasks
 src/airgap_rag/llm/       LLM provider contract, mock and Ollama adapter
 alembic/               database migrations
@@ -337,7 +357,7 @@ docs/                  Russian technical documentation and ADR
 - [x] RAG and citations
 - [x] SSE streaming
 - [x] Evaluation
-- [ ] Benchmarking
+- [x] Benchmarking
 - [ ] Observability
 - [ ] Air-gapped deployment
 - [ ] Additional inference runtimes
