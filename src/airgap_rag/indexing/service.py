@@ -81,6 +81,17 @@ class IndexingService:
                             "page": chunk.page,
                             "chunk_index": chunk.chunk_index,
                             "text_hash": chunk.text_hash,
+                            "section": chunk.section,
+                            "content_type": chunk.content_type,
+                            "department": document.department,
+                            "document_type": document.document_type,
+                            "document_date": (
+                                document.document_date.isoformat()
+                                if document.document_date is not None
+                                else None
+                            ),
+                            "access_level": document.access_level,
+                            "tags": document.tags,
                         },
                     )
                     for chunk, vector in zip(chunks, vectors, strict=True)

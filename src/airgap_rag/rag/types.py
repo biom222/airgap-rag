@@ -22,7 +22,9 @@ class Citation:
     page: int | None
     chunk_id: UUID
     vector_score: float
-    rerank_score: float | None
+    lexical_score: float | None = None
+    fusion_score: float | None = None
+    rerank_score: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

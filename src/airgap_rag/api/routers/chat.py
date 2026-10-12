@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from airgap_rag.api.dependencies.auth import get_current_principal
 from airgap_rag.api.dependencies.chat import get_chat_service
 from airgap_rag.api.schemas.chat import (
     ChatDoneEvent,
@@ -16,6 +17,7 @@ from airgap_rag.api.schemas.chat import (
     ChatSourcesEvent,
     ChatTokenEvent,
 )
+from airgap_rag.auth import Principal
 from airgap_rag.core.config import Settings
 from airgap_rag.core.exceptions import AppError
 from airgap_rag.rag.service import RAGService
@@ -32,12 +34,14 @@ def _source_response(source: Citation) -> ChatSourceResponse:
         page=source.page,
         chunk_id=source.chunk_id,
         score=source.vector_score,
+        lexical_score=source.lexical_score,
+        fusion_score=source.fusion_score,
         rerank_score=source.rerank_score,
     )
 
 
 def _sse_event(name: str, payload: BaseModel) -> str:
-    return f"event: {name}\ndata: {payload.model_dump_json()}\n\n"
+    return f"event: {name}\ndata: {payload.model_dump_json(exclude_none=True)}\n\n"
 
 
 @router.post("", response_model=ChatResponse)
@@ -45,15 +49,29 @@ async def chat(
     payload: ChatRequest,
     request: Request,
     service: Annotated[RAGService, Depends(get_chat_service)],
+    principal: Annotated[Principal, Depends(get_current_principal)],
 ) -> ChatResponse:
     settings: Settings = request.app.state.settings
-    result = await service.answer(
-        payload.question,
-        session_id=payload.session_id,
-        document_ids=payload.document_ids,
-        top_k=settings.retrieval_top_k,
-        top_n=settings.reranker_top_n,
+    filters = payload.filters(
+        max_access_level=None if principal.is_admin else principal.access_level
     )
+    if filters is None:
+        result = await service.answer(
+            payload.question,
+            session_id=payload.session_id,
+            document_ids=payload.document_ids,
+            top_k=settings.retrieval_top_k,
+            top_n=settings.reranker_top_n,
+        )
+    else:
+        result = await service.answer(
+            payload.question,
+            session_id=payload.session_id,
+            document_ids=payload.document_ids,
+            top_k=settings.retrieval_top_k,
+            top_n=settings.reranker_top_n,
+            filters=filters,
+        )
     return ChatResponse(
         answer=result.answer,
         session_id=result.session_id,
@@ -70,15 +88,29 @@ async def stream_chat(
     payload: ChatRequest,
     request: Request,
     service: Annotated[RAGService, Depends(get_chat_service)],
+    principal: Annotated[Principal, Depends(get_current_principal)],
 ) -> StreamingResponse:
     settings: Settings = request.app.state.settings
-    result = await service.stream_answer(
-        payload.question,
-        session_id=payload.session_id,
-        document_ids=payload.document_ids,
-        top_k=settings.retrieval_top_k,
-        top_n=settings.reranker_top_n,
+    filters = payload.filters(
+        max_access_level=None if principal.is_admin else principal.access_level
     )
+    if filters is None:
+        result = await service.stream_answer(
+            payload.question,
+            session_id=payload.session_id,
+            document_ids=payload.document_ids,
+            top_k=settings.retrieval_top_k,
+            top_n=settings.reranker_top_n,
+        )
+    else:
+        result = await service.stream_answer(
+            payload.question,
+            session_id=payload.session_id,
+            document_ids=payload.document_ids,
+            top_k=settings.retrieval_top_k,
+            top_n=settings.reranker_top_n,
+            filters=filters,
+        )
 
     async def events() -> AsyncGenerator[str, None]:
         stream = result.events

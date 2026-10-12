@@ -4,6 +4,7 @@ from uuid import UUID
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http import models
 
+from airgap_rag.retrieval.filters import RetrievalFilters
 from airgap_rag.vector_store.base import (
     VectorPoint,
     VectorSearchResult,
@@ -59,6 +60,18 @@ class QdrantVectorStore:
             field_schema=models.PayloadSchemaType.UUID,
             wait=True,
         )
+        for field_name, schema in (
+            ("department", models.PayloadSchemaType.KEYWORD),
+            ("document_type", models.PayloadSchemaType.KEYWORD),
+            ("access_level", models.PayloadSchemaType.INTEGER),
+            ("tags", models.PayloadSchemaType.KEYWORD),
+        ):
+            await self._client.create_payload_index(
+                collection_name=self._collection_name,
+                field_name=field_name,
+                field_schema=schema,
+                wait=True,
+            )
         await self._client.create_payload_index(
             collection_name=self._collection_name,
             field_name="owner_id",
@@ -111,6 +124,7 @@ class QdrantVectorStore:
         limit: int,
         document_ids: list[UUID] | None = None,
         owner_id: str | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[VectorSearchResult]:
         conditions: list[models.Condition] = []
         if document_ids:
@@ -127,6 +141,31 @@ class QdrantVectorStore:
                     match=models.MatchValue(value=owner_id),
                 )
             )
+        if filters is not None:
+            if filters.department is not None:
+                conditions.append(
+                    models.FieldCondition(
+                        key="department", match=models.MatchValue(value=filters.department)
+                    )
+                )
+            if filters.document_type is not None:
+                conditions.append(
+                    models.FieldCondition(
+                        key="document_type",
+                        match=models.MatchValue(value=filters.document_type),
+                    )
+                )
+            if filters.max_access_level is not None:
+                conditions.append(
+                    models.FieldCondition(
+                        key="access_level",
+                        range=models.Range(lte=filters.max_access_level),
+                    )
+                )
+            for tag in filters.tags:
+                conditions.append(
+                    models.FieldCondition(key="tags", match=models.MatchValue(value=tag))
+                )
         query_filter = models.Filter(must=conditions) if conditions else None
 
         response = await self._client.query_points(

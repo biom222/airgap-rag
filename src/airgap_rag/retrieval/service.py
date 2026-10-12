@@ -1,7 +1,7 @@
 import logging
 from dataclasses import dataclass, replace
 from time import perf_counter
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from airgap_rag.core.tracing import tracer
@@ -9,6 +9,7 @@ from airgap_rag.db.models.documents import DocumentChunk
 from airgap_rag.embeddings.base import EmbeddingProvider
 from airgap_rag.metrics import MetricsRecorder, NoOpMetrics
 from airgap_rag.reranking.base import RerankDocument, Reranker, RerankerError
+from airgap_rag.retrieval.filters import RetrievalFilters
 from airgap_rag.vector_store.base import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ class RetrievedChunk:
     chunk_index: int
     text: str
     vector_score: float
+    lexical_score: float | None = None
+    fusion_score: float | None = None
     rerank_score: float | None = None
 
 
@@ -57,6 +60,7 @@ class RetrievalService:
         top_k: int,
         top_n: int | None = None,
         document_ids: list[UUID] | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[RetrievedChunk]:
         embedding_started = perf_counter()
         with retrieval_tracer.start_as_current_span("rag.embedding") as span:
@@ -69,24 +73,62 @@ class RetrievalService:
         with retrieval_tracer.start_as_current_span("rag.retrieval") as span:
             span.set_attribute("rag.top_k", top_k)
             await self._vector_store.ensure_collection(self._embedding_provider.dimension)
-            hits = await self._vector_store.search(
-                vector,
-                limit=top_k,
-                document_ids=document_ids,
-                owner_id=self._owner_id,
+            candidate_limit = max(top_k * 2, top_k)
+            if filters is None:
+                hits = await self._vector_store.search(
+                    vector,
+                    limit=candidate_limit,
+                    document_ids=document_ids,
+                    owner_id=self._owner_id,
+                )
+            else:
+                hits = await self._vector_store.search(
+                    vector,
+                    limit=candidate_limit,
+                    document_ids=document_ids,
+                    owner_id=self._owner_id,
+                    filters=filters,
+                )
+            lexical_hits: list[Any] = []
+            lexical_search = getattr(self._repository, "lexical_search", None)
+            if lexical_search is not None:
+                lexical_hits = await lexical_search(
+                    question,
+                    limit=candidate_limit,
+                    document_ids=document_ids,
+                    owner_id=self._owner_id,
+                    filters=filters,
+                )
+            ordered_ids, fusion_scores = self._fuse(
+                [hit.id for hit in hits],
+                [hit.chunk_id for hit in lexical_hits],
             )
-            chunks = await self._repository.get_chunks([hit.id for hit in hits])
-            span.set_attribute("rag.hit_count", len(hits))
+            filter_chunks = getattr(self._repository, "filter_chunks", None)
+            if filter_chunks is not None:
+                chunks = await filter_chunks(
+                    ordered_ids,
+                    owner_id=self._owner_id,
+                    filters=filters,
+                )
+            else:
+                chunks = await self._repository.get_chunks(ordered_ids)
+            span.set_attribute("rag.vector_hit_count", len(hits))
+            span.set_attribute("rag.lexical_hit_count", len(lexical_hits))
 
+        vector_by_id = {hit.id: hit for hit in hits}
+        lexical_by_id = {hit.chunk_id: hit for hit in lexical_hits}
         results: list[RetrievedChunk] = []
-        for hit in hits:
-            chunk = chunks.get(hit.id)
+        for chunk_id in ordered_ids:
+            chunk = chunks.get(chunk_id)
             if chunk is None:
-                logger.warning("retrieved_chunk_missing", extra={"chunk_id": str(hit.id)})
                 continue
-            filename = hit.payload.get("filename")
+            vector_hit = vector_by_id.get(chunk_id)
+            lexical_hit = lexical_by_id.get(chunk_id)
+            filename = vector_hit.payload.get("filename") if vector_hit is not None else None
+            if filename is None and lexical_hit is not None:
+                filename = lexical_hit.filename
             if not isinstance(filename, str) or not filename:
-                logger.warning("retrieved_payload_invalid", extra={"chunk_id": str(hit.id)})
+                logger.warning("retrieved_payload_invalid", extra={"chunk_id": str(chunk_id)})
                 continue
             results.append(
                 RetrievedChunk(
@@ -96,9 +138,13 @@ class RetrievalService:
                     chunk_id=chunk.id,
                     chunk_index=chunk.chunk_index,
                     text=chunk.text,
-                    vector_score=hit.score,
+                    vector_score=vector_hit.score if vector_hit is not None else 0.0,
+                    lexical_score=lexical_hit.score if lexical_hit is not None else None,
+                    fusion_score=fusion_scores[chunk_id],
                 )
             )
+            if len(results) >= top_k:
+                break
         retrieval_duration = perf_counter() - retrieval_started
         self._metrics.observe_retrieval(retrieval_duration)
         result_limit = min(top_n, len(results)) if top_n is not None else len(results)
@@ -138,6 +184,17 @@ class RetrievalService:
             result_count=min(result_limit, len(scored)),
         )
         return scored[:result_limit]
+
+    @staticmethod
+    def _fuse(
+        vector_ids: list[UUID], lexical_ids: list[UUID]
+    ) -> tuple[list[UUID], dict[UUID, float]]:
+        scores: dict[UUID, float] = {}
+        for ranking in (vector_ids, lexical_ids):
+            for rank, chunk_id in enumerate(ranking, start=1):
+                scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (60 + rank)
+        ordered = sorted(scores, key=lambda chunk_id: scores[chunk_id], reverse=True)
+        return ordered, scores
 
     def _log_completed(
         self,

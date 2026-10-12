@@ -21,9 +21,11 @@ retrieval, reranking, local LLM providers и RAG API с citations.
 - загрузка PDF, DOCX и UTF-8 TXT с ограничением размера;
 - потоковый SHA-256, дедупликация и локальное файловое хранилище;
 - независимые parsers для PDF, DOCX и TXT;
-- конфигурируемый character chunking с overlap и привязкой к странице;
+- структурный chunking с heading/table metadata, overlap и привязкой к странице;
+- OCR fallback для scanned PDF через Tesseract (`rus+eng` по умолчанию);
 - `EmbeddingProvider` с deterministic mock и sentence-transformers adapter;
-- Qdrant adapter с cosine collection и фильтрацией по `document_ids`;
+- hybrid retrieval: Qdrant cosine + PostgreSQL full-text с RRF fusion;
+- metadata-фильтры по подразделению, типу, дате, тегам и уровню доступа;
 - идемпотентный indexing service и retrieval endpoint;
 - Redis Streams broker и отдельный Taskiq worker;
 - сохраняемая в PostgreSQL job state machine, retries и exponential backoff;
@@ -164,9 +166,10 @@ curl -X POST http://localhost:8000/api/v1/retrieval/search \
   -d '{"question":"срок хранения договора","top_k":5}'
 ```
 
-Можно передать `document_ids`. Ответ содержит текст из PostgreSQL, page,
-`chunk_id`, `chunk_index`, `vector_score` и, если включён reranker,
-`rerank_score`.
+Можно передать `document_ids`, `department`, `document_type`, `date_from`,
+`date_to` и `tags`. Ответ содержит текст из PostgreSQL, page, `chunk_id`,
+`chunk_index`, `vector_score`, `lexical_score`, `fusion_score` и, если включён
+reranker, `rerank_score`.
 
 ## Chat API
 
@@ -180,8 +183,9 @@ curl -X POST http://localhost:8000/api/v1/chat \
 
 Ответ содержит `answer`, новый `session_id` и массив `sources`. Повторный запрос
 с тем же `session_id` добавляет ограниченную историю разговора. Источники
-формируются сервером из реально переданных модели chunks, а не разбираются из
-текста LLM.
+формируются сервером из реально переданных модели chunks. Утверждения ответа
+проверяются по ссылкам `[S#]` и lexical overlap; неподтверждённый ответ заменяется
+безопасным сообщением о недостатке контекста.
 
 Streaming использует тот же request body:
 
@@ -209,6 +213,11 @@ python -m airgap_rag.evaluation evaluation/datasets/retrieval.jsonl \
 
 Формат разметки, правила интерпретации метрик и ограничения описаны в
 [docs/evaluation.md](docs/evaluation.md).
+
+Generation evaluation запускается тем же CLI с `--mode generation`, сравнивает
+ответ с эталоном, проверяет citation precision/recall и faithfulness и завершает
+процесс кодом `2`, если regression thresholds не пройдены. Подробности:
+[docs/rag-quality.md](docs/rag-quality.md).
 
 ## Benchmarking
 
@@ -298,6 +307,10 @@ API metrics доступны на `http://127.0.0.1:8000/metrics`, Grafana — �
 | `DOCUMENT_MAX_UPLOAD_BYTES` | Максимальный размер upload | `26214400` |
 | `DOCUMENT_MAX_DOCX_UNCOMPRESSED_BYTES` | Лимит распакованного DOCX | `104857600` |
 | `DOCUMENT_READ_CHUNK_BYTES` | Размер блока streaming upload | `1048576` |
+| `DOCUMENT_OCR_ENABLED` | OCR fallback для страниц без текстового слоя | `true` |
+| `DOCUMENT_OCR_LANGUAGES` | Языки Tesseract | `rus+eng` |
+| `DOCUMENT_OCR_MIN_TEXT_CHARS` | Порог запуска OCR | `40` |
+| `DOCUMENT_OCR_DPI` | DPI OCR-rendering | `300` |
 | `CHUNK_SIZE` | Целевой размер chunk в символах | `1200` |
 | `CHUNK_OVERLAP` | Перекрытие соседних chunks | `200` |
 | `AIRGAP_MODE` | Запрет загрузки embedding model из сети | `true` |
@@ -331,6 +344,8 @@ API metrics доступны на `http://127.0.0.1:8000/metrics`, Grafana — �
 | `LLM_MAX_TOKENS` | Максимум generated tokens | `1024` |
 | `RAG_CONTEXT_MAX_CHARACTERS` | Максимальный объём document context | `16000` |
 | `CHAT_HISTORY_MAX_MESSAGES` | Число прошлых сообщений в prompt | `10` |
+| `CITATION_VERIFICATION_ENABLED` | Проверка поддержки утверждений sources | `true` |
+| `CITATION_MIN_TOKEN_OVERLAP` | Минимальное lexical overlap | `0.2` |
 
 ## Структура
 
@@ -361,12 +376,9 @@ docs/                  Russian technical documentation and ADR
 
 ## Ограничения текущей версии
 
-- DOCX parser извлекает paragraphs и tables, но не восстанавливает layout;
-- scanned PDF без текстового слоя требует будущего OCR и сейчас даст пустой текст;
+- сложные DOCX/PDF layout и OCR требуют проверки на доменных документах;
 - default mock embeddings не обеспечивают semantic relevance;
 - sentence-transformers package и model не входят в базовый Docker image;
-- нет отдельной outbox-таблицы: если dispatch в Redis не удался, сохранённый
-  `PENDING` job будет повторно отправлен при повторной загрузке того же файла;
 - Ollama model weights требуют отдельной ручной подготовки;
 - prompt-injection защита уменьшает риск, но не даёт абсолютной гарантии;
 - реальная embedding model должна быть подготовлена отдельно.

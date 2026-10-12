@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +28,8 @@ class Document(Base):
         UniqueConstraint("owner_id", "sha256", name="uq_documents_owner_sha256"),
         CheckConstraint("size > 0", name="ck_documents_size_positive"),
         CheckConstraint("page_count IS NULL OR page_count >= 0", name="ck_documents_page_count"),
+        CheckConstraint("access_level >= 0", name="ck_documents_access_level"),
+        Index("ix_documents_metadata", "department", "document_type", "document_date"),
     )
 
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -48,6 +51,11 @@ class Document(Base):
         default=DocumentStatus.PENDING,
     )
     page_count: Mapped[int | None] = mapped_column(Integer)
+    department: Mapped[str | None] = mapped_column(String(100))
+    document_type: Mapped[str | None] = mapped_column(String(100))
+    document_date: Mapped[date | None]
+    access_level: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -75,6 +83,8 @@ class DocumentChunk(Base):
     page: Mapped[int | None] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     text_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    section: Mapped[str | None] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(32), nullable=False, default="text")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

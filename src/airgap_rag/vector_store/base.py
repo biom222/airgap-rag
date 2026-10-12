@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
 
+from airgap_rag.retrieval.filters import RetrievalFilters
+
 
 @dataclass(frozen=True, slots=True)
 class VectorPoint:
@@ -31,6 +33,7 @@ class VectorStore(Protocol):
         limit: int,
         document_ids: list[UUID] | None = None,
         owner_id: str | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[VectorSearchResult]: ...
 
     async def healthcheck(self) -> bool: ...

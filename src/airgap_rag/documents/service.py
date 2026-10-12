@@ -11,7 +11,7 @@ from airgap_rag.db.models.outbox import OutboxEvent
 from airgap_rag.db.repositories.documents import DocumentRepository
 from airgap_rag.documents.errors import DocumentNotFoundError
 from airgap_rag.documents.storage import LocalDocumentStore
-from airgap_rag.documents.types import DocumentStatus
+from airgap_rag.documents.types import DocumentMetadata, DocumentStatus
 from airgap_rag.documents.validation import DocumentValidator
 from airgap_rag.jobs.types import JobStatus, JobType
 from airgap_rag.metrics import MetricsRecorder, NoOpMetrics
@@ -45,7 +45,12 @@ class DocumentService:
         self._trace_id = trace_id
         self._trace_context = trace_context or {}
 
-    async def upload(self, upload: UploadFile) -> UploadResult:
+    async def upload(
+        self,
+        upload: UploadFile,
+        metadata: DocumentMetadata | None = None,
+    ) -> UploadResult:
+        resolved_metadata = metadata or DocumentMetadata()
         staged = await self._store.stage(upload)
         promoted_storage_key: str | None = None
         try:
@@ -72,6 +77,11 @@ class DocumentService:
                 sha256=staged.sha256,
                 status=DocumentStatus.PENDING,
                 page_count=None,
+                department=resolved_metadata.department,
+                document_type=resolved_metadata.document_type,
+                document_date=resolved_metadata.document_date,
+                access_level=resolved_metadata.access_level,
+                tags=list(resolved_metadata.tags),
             )
             job = Job(
                 id=uuid4(),

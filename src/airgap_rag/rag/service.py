@@ -16,6 +16,7 @@ from airgap_rag.llm.base import (
     LLMUnavailableError,
 )
 from airgap_rag.metrics import MetricsRecorder, NoOpMetrics
+from airgap_rag.rag.citations import CitationVerifier
 from airgap_rag.rag.errors import (
     ChatSessionNotFoundError,
     LLMGenerationFailedError,
@@ -31,7 +32,8 @@ from airgap_rag.rag.types import (
     RAGStreamEvent,
     RAGStreamToken,
 )
-from airgap_rag.retrieval.service import RetrievalService
+from airgap_rag.retrieval.filters import RetrievalFilters
+from airgap_rag.retrieval.service import RetrievalService, RetrievedChunk
 
 INSUFFICIENT_CONTEXT_ANSWER = "В предоставленных документах недостаточно информации для ответа."
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class _PreparedAnswer:
     messages: tuple[LLMMessage, ...] | None
     fallback_answer: str | None
     sources: tuple[Citation, ...]
+    context_chunks: tuple[RetrievedChunk, ...]
     started_at: float
 
 
@@ -59,6 +62,7 @@ class RAGService:
         history_limit: int,
         metrics: MetricsRecorder | None = None,
         trace_id: str | None = None,
+        citation_verifier: CitationVerifier | None = None,
     ) -> None:
         self._retrieval_service = retrieval_service
         self._chat_repository = chat_repository
@@ -67,6 +71,7 @@ class RAGService:
         self._history_limit = history_limit
         self._metrics = metrics or NoOpMetrics()
         self._trace_id = trace_id
+        self._citation_verifier = citation_verifier
 
     async def answer(
         self,
@@ -76,6 +81,7 @@ class RAGService:
         document_ids: list[UUID] | None,
         top_k: int,
         top_n: int,
+        filters: RetrievalFilters | None = None,
     ) -> RAGAnswer:
         started_at = perf_counter()
         outcome = "error"
@@ -87,11 +93,16 @@ class RAGService:
                 top_k=top_k,
                 top_n=top_n,
                 started_at=started_at,
+                filters=filters,
             )
             if prepared.messages is None:
                 answer = prepared.fallback_answer or INSUFFICIENT_CONTEXT_ANSWER
             else:
                 answer = await self._generate(prepared.messages)
+
+            sources = prepared.sources
+            if prepared.messages is not None and self._citation_verifier is not None:
+                answer, sources = self._verified_answer(answer, prepared)
 
             resolved_session_id = await self._chat_repository.save_exchange(
                 session_id,
@@ -102,7 +113,7 @@ class RAGService:
             return RAGAnswer(
                 answer=answer,
                 session_id=resolved_session_id,
-                sources=prepared.sources,
+                sources=sources,
             )
         finally:
             self._finish_rag("sync", outcome, started_at)
@@ -115,6 +126,7 @@ class RAGService:
         document_ids: list[UUID] | None,
         top_k: int,
         top_n: int,
+        filters: RetrievalFilters | None = None,
     ) -> RAGStream:
         started_at = perf_counter()
         try:
@@ -125,6 +137,7 @@ class RAGService:
                 top_k=top_k,
                 top_n=top_n,
                 started_at=started_at,
+                filters=filters,
             )
         except Exception:
             self._finish_rag("stream", "error", started_at)
@@ -143,6 +156,7 @@ class RAGService:
         top_k: int,
         top_n: int,
         started_at: float,
+        filters: RetrievalFilters | None,
     ) -> _PreparedAnswer:
         history: list[ChatHistoryMessage] = []
         if session_id is not None:
@@ -154,12 +168,21 @@ class RAGService:
                 raise ChatSessionNotFoundError()
             history = loaded_history
 
-        chunks = await self._retrieval_service.search(
-            question,
-            top_k=top_k,
-            top_n=top_n,
-            document_ids=document_ids,
-        )
+        if filters is None:
+            chunks = await self._retrieval_service.search(
+                question,
+                top_k=top_k,
+                top_n=top_n,
+                document_ids=document_ids,
+            )
+        else:
+            chunks = await self._retrieval_service.search(
+                question,
+                top_k=top_k,
+                top_n=top_n,
+                document_ids=document_ids,
+                filters=filters,
+            )
         built_prompt = self._prompt_builder.build(question, chunks, history) if chunks else None
         source_chunks = built_prompt.context_chunks if built_prompt is not None else ()
         sources = tuple(
@@ -169,6 +192,8 @@ class RAGService:
                 page=chunk.page,
                 chunk_id=chunk.chunk_id,
                 vector_score=chunk.vector_score,
+                lexical_score=chunk.lexical_score,
+                fusion_score=chunk.fusion_score,
                 rerank_score=chunk.rerank_score,
             )
             for chunk in source_chunks
@@ -179,8 +204,22 @@ class RAGService:
             messages=built_prompt.messages if built_prompt is not None else None,
             fallback_answer=None if built_prompt is not None else INSUFFICIENT_CONTEXT_ANSWER,
             sources=sources,
+            context_chunks=source_chunks,
             started_at=started_at,
         )
+
+    def _verified_answer(
+        self,
+        answer: str,
+        prepared: _PreparedAnswer,
+    ) -> tuple[str, tuple[Citation, ...]]:
+        if self._citation_verifier is None:
+            return answer, prepared.sources
+        result = self._citation_verifier.verify(answer, prepared.context_chunks)
+        if not result.valid:
+            logger.warning("rag_citation_verification_failed", extra={"trace_id": self._trace_id})
+            return INSUFFICIENT_CONTEXT_ANSWER, ()
+        return answer, tuple(prepared.sources[index - 1] for index in result.cited_indices)
 
     async def _generate(self, messages: tuple[LLMMessage, ...]) -> str:
         started_at = perf_counter()
@@ -229,7 +268,8 @@ class RAGService:
                                 self._metrics.observe_llm_ttft(ttft)
                                 first_token_recorded = True
                             parts.append(text)
-                            yield RAGStreamToken(text)
+                            if self._citation_verifier is None:
+                                yield RAGStreamToken(text)
                 except (LLMUnavailableError, LLMModelNotFoundError) as exc:
                     outcome = "error"
                     raise LLMServiceUnavailableError() from exc
@@ -253,6 +293,9 @@ class RAGService:
                 if not answer:
                     outcome = "error"
                     raise LLMGenerationFailedError()
+                if self._citation_verifier is not None:
+                    answer, _ = self._verified_answer(answer, prepared)
+                    yield RAGStreamToken(answer)
 
             resolved_session_id = await self._chat_repository.save_exchange(
                 prepared.session_id,

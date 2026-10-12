@@ -11,6 +11,7 @@ from airgap_rag.db.repositories.indexing import SessionChunkRepository
 from airgap_rag.embeddings.base import EmbeddingProvider
 from airgap_rag.llm.base import LLMProvider
 from airgap_rag.metrics import MetricsRecorder
+from airgap_rag.rag.citations import CitationVerifier
 from airgap_rag.rag.prompting import PromptBuilder
 from airgap_rag.rag.service import RAGService
 from airgap_rag.reranking.base import Reranker
@@ -53,4 +54,9 @@ def get_chat_service(
         history_limit=settings.chat_history_max_messages,
         metrics=metrics,
         trace_id=str(request.state.trace_id),
+        citation_verifier=(
+            CitationVerifier(settings.citation_min_token_overlap)
+            if settings.citation_verification_enabled
+            else None
+        ),
     )

@@ -13,6 +13,8 @@ class Chunk:
     page: int | None
     text: str
     text_hash: str
+    section: str | None = None
+    content_type: str = "text"
 
 
 class Chunker(Protocol):

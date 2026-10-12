@@ -2,7 +2,7 @@ import hashlib
 from uuid import UUID, uuid5
 
 from airgap_rag.chunking.base import Chunk
-from airgap_rag.documents.parsers import ParsedDocument
+from airgap_rag.documents.parsers import ParsedBlock, ParsedDocument
 
 
 class RecursiveCharacterChunker:
@@ -21,20 +21,56 @@ class RecursiveCharacterChunker:
     def split(self, document_id: UUID, document: ParsedDocument) -> tuple[Chunk, ...]:
         chunks: list[Chunk] = []
         for page in document.pages:
-            for text in self._split_text(page.text):
-                text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-                chunk_index = len(chunks)
-                chunks.append(
-                    Chunk(
-                        id=uuid5(document_id, f"{chunk_index}:{text_hash}"),
+            items = (
+                self._structured_parts(page.blocks) if page.blocks else ((page.text, None, "text"),)
+            )
+            for source_text, section, content_type in items:
+                for text in self._split_text(source_text):
+                    rendered = text
+                    if section and content_type != "heading" and not text.startswith(section):
+                        rendered = f"{section}\n{text}"
+                    self._append_chunk(
+                        chunks,
                         document_id=document_id,
-                        chunk_index=chunk_index,
                         page=page.page,
-                        text=text,
-                        text_hash=text_hash,
+                        text=rendered,
+                        section=section,
+                        content_type=content_type,
                     )
-                )
         return tuple(chunks)
+
+    @staticmethod
+    def _structured_parts(
+        blocks: tuple[ParsedBlock, ...],
+    ) -> tuple[tuple[str, str | None, str], ...]:
+        return tuple(
+            (block.text, block.section, block.kind) for block in blocks if block.text.strip()
+        )
+
+    @staticmethod
+    def _append_chunk(
+        chunks: list[Chunk],
+        *,
+        document_id: UUID,
+        page: int | None,
+        text: str,
+        section: str | None,
+        content_type: str,
+    ) -> None:
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        chunk_index = len(chunks)
+        chunks.append(
+            Chunk(
+                id=uuid5(document_id, f"{chunk_index}:{text_hash}"),
+                document_id=document_id,
+                chunk_index=chunk_index,
+                page=page,
+                text=text,
+                text_hash=text_hash,
+                section=section,
+                content_type=content_type,
+            )
+        )
 
     def _split_text(self, text: str) -> tuple[str, ...]:
         normalized = text.strip()

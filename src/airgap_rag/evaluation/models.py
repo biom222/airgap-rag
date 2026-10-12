@@ -65,3 +65,56 @@ class EvaluationReport(BaseModel):
     mrr: float = Field(ge=0.0, le=1.0)
     mrr_cutoff: int = Field(ge=1)
     cases: tuple[EvaluationCaseResult, ...]
+
+
+class GenerationEvaluationCase(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    case_id: str = Field(min_length=1, max_length=100)
+    question: str = Field(min_length=1, max_length=4000)
+    reference_answer: str = Field(min_length=1)
+    relevant_chunk_ids: tuple[UUID, ...] = Field(min_length=1)
+    document_ids: tuple[UUID, ...] | None = None
+
+    @field_validator("case_id", "question", "reference_answer")
+    @classmethod
+    def strip_generation_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("value must not be blank")
+        return stripped
+
+    @field_validator("relevant_chunk_ids")
+    @classmethod
+    def reject_duplicate_generation_chunks(cls, value: tuple[UUID, ...]) -> tuple[UUID, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("relevant_chunk_ids must not contain duplicates")
+        return value
+
+
+class GenerationCaseResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    case_id: str
+    answer: str
+    answer_f1: float = Field(ge=0.0, le=1.0)
+    citation_precision: float = Field(ge=0.0, le=1.0)
+    citation_recall: float = Field(ge=0.0, le=1.0)
+    faithfulness: float = Field(ge=0.0, le=1.0)
+
+
+class GenerationEvaluationReport(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    schema_version: int = 1
+    evaluated_at: datetime
+    dataset_name: str
+    base_url: str
+    case_count: int = Field(ge=1)
+    answer_f1: float = Field(ge=0.0, le=1.0)
+    citation_precision: float = Field(ge=0.0, le=1.0)
+    citation_recall: float = Field(ge=0.0, le=1.0)
+    faithfulness: float = Field(ge=0.0, le=1.0)
+    passed: bool
+    thresholds: dict[str, float]
+    cases: tuple[GenerationCaseResult, ...]

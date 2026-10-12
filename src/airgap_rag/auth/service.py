@@ -15,6 +15,7 @@ class Role(StrEnum):
 class Principal:
     subject: str
     role: Role
+    access_level: int = 0
 
     @property
     def is_admin(self) -> bool:
@@ -46,7 +47,7 @@ class Authenticator:
 
     def authenticate(self, token: str | None) -> Principal | None:
         if not self.required:
-            return Principal(subject="local-development", role=Role.ADMIN)
+            return Principal(subject="local-development", role=Role.ADMIN, access_level=100)
         if token is None:
             return None
         candidate = self.token_digest(token)
@@ -73,6 +74,7 @@ class Authenticator:
             subject = record.get("subject")
             role_value = record.get("role")
             digest = record.get("token_sha256")
+            access_level = record.get("access_level", 100 if role_value == Role.ADMIN else 0)
             if not isinstance(subject, str) or not subject.strip() or len(subject) > 100:
                 raise AuthConfigurationError("Principal subject must contain 1-100 characters")
             if not isinstance(role_value, str):
@@ -81,6 +83,14 @@ class Authenticator:
                 role = Role(role_value)
             except (TypeError, ValueError) as exc:
                 raise AuthConfigurationError("Principal role must be admin or user") from exc
+            if (
+                not isinstance(access_level, int)
+                or isinstance(access_level, bool)
+                or access_level < 0
+            ):
+                raise AuthConfigurationError(
+                    "Principal access_level must be a non-negative integer"
+                )
             if (
                 not isinstance(digest, str)
                 or len(digest) != 64
@@ -96,7 +106,11 @@ class Authenticator:
             credentials.append(
                 _Credential(
                     token_sha256=normalized_digest,
-                    principal=Principal(subject=normalized_subject, role=role),
+                    principal=Principal(
+                        subject=normalized_subject,
+                        role=role,
+                        access_level=access_level,
+                    ),
                 )
             )
         return tuple(credentials)

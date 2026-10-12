@@ -1,9 +1,10 @@
 import json
 from pathlib import Path
+from typing import Any, cast
 
 from pydantic import ValidationError
 
-from airgap_rag.evaluation.models import EvaluationCase
+from airgap_rag.evaluation.models import EvaluationCase, GenerationEvaluationCase
 
 
 class EvaluationDatasetError(ValueError):
@@ -35,6 +36,37 @@ def load_evaluation_dataset(path: Path) -> tuple[EvaluationCase, ...]:
         case_ids.add(case.case_id)
         cases.append(case)
 
+    if not cases:
+        raise EvaluationDatasetError(f"Dataset {path} does not contain evaluation cases")
+    return tuple(cases)
+
+
+def load_generation_dataset(path: Path) -> tuple[GenerationEvaluationCase, ...]:
+    return cast(tuple[GenerationEvaluationCase, ...], _load_dataset(path, GenerationEvaluationCase))
+
+
+def _load_dataset(path: Path, model: Any) -> tuple[Any, ...]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise EvaluationDatasetError(f"Cannot read dataset {path}: {exc}") from exc
+    cases = []
+    case_ids: set[str] = set()
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            case = model.model_validate_json(line)
+        except ValidationError as exc:
+            raise EvaluationDatasetError(
+                f"Invalid dataset record at {path}:{line_number}: {exc}"
+            ) from exc
+        if case.case_id in case_ids:
+            raise EvaluationDatasetError(
+                f"Duplicate case_id {case.case_id!r} at {path}:{line_number}"
+            )
+        case_ids.add(case.case_id)
+        cases.append(case)
     if not cases:
         raise EvaluationDatasetError(f"Dataset {path} does not contain evaluation cases")
     return tuple(cases)

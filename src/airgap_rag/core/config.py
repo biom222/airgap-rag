@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     document_max_upload_bytes: int = Field(default=25 * 1024 * 1024, gt=0)
     document_max_docx_uncompressed_bytes: int = Field(default=100 * 1024 * 1024, gt=0)
     document_read_chunk_bytes: int = Field(default=1024 * 1024, gt=0)
+    document_ocr_enabled: bool = True
+    document_ocr_languages: str = "rus+eng"
+    document_ocr_min_text_chars: int = Field(default=40, ge=0)
+    document_ocr_dpi: int = Field(default=300, ge=72, le=600)
 
     chunk_size: int = Field(default=1200, ge=100)
     chunk_overlap: int = Field(default=200, ge=0)
@@ -79,6 +83,8 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=1024, ge=1)
     rag_context_max_characters: int = Field(default=16_000, ge=1_000)
     chat_history_max_messages: int = Field(default=10, ge=0, le=100)
+    citation_verification_enabled: bool = True
+    citation_min_token_overlap: float = Field(default=0.2, ge=0.0, le=1.0)
 
     @field_validator("database_url")
     @classmethod

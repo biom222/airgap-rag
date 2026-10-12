@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from airgap_rag.chunking.recursive import RecursiveCharacterChunker
 from airgap_rag.core.config import Settings
 from airgap_rag.db.repositories.indexing import SQLAlchemyIndexingRepository
-from airgap_rag.documents.parsers import ParserRegistry
+from airgap_rag.documents.parsers import ParserRegistry, PdfParser
 from airgap_rag.documents.storage import LocalDocumentStore
 from airgap_rag.embeddings.base import EmbeddingProvider
 from airgap_rag.indexing.service import IndexingService
@@ -27,7 +27,14 @@ def create_indexing_service(
             max_upload_bytes=settings.document_max_upload_bytes,
             read_chunk_bytes=settings.document_read_chunk_bytes,
         ),
-        parser_registry=ParserRegistry(),
+        parser_registry=ParserRegistry(
+            pdf_parser=PdfParser(
+                ocr_enabled=settings.document_ocr_enabled,
+                ocr_languages=settings.document_ocr_languages,
+                ocr_min_text_chars=settings.document_ocr_min_text_chars,
+                ocr_dpi=settings.document_ocr_dpi,
+            )
+        ),
         chunker=RecursiveCharacterChunker(settings.chunk_size, settings.chunk_overlap),
         embedding_provider=embedding_provider,
         vector_store=vector_store,
