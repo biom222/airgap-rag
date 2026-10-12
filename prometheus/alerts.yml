@@ -1,0 +1,43 @@
+groups:
+  - name: airgap-rag
+    rules:
+      - alert: AirGapRAGAPIDown
+        expr: up{job="airgap-rag-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: AirGapRAG API is unavailable
+      - alert: AirGapRAGWorkerMetricsDown
+        expr: up{job="airgap-rag-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: AirGapRAG worker is unavailable
+      - alert: AirGapRAGHighHTTPErrorRate
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5% of HTTP requests fail with 5xx
+      - alert: AirGapRAGHighRAGLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(rag_request_duration_seconds_bucket[10m]))) > 30
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAG p95 latency exceeds 30 seconds
+      - alert: AirGapRAGIngestionFailure
+        expr: increase(document_ingestion_failures_total[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: A document ingestion job failed permanently
+      - alert: AirGapRAGRepeatedTaskFailures
+        expr: increase(task_failures_total[15m]) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: Background tasks are repeatedly failing

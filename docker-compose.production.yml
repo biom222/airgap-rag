@@ -1,0 +1,163 @@
+x-app-production: &app-production
+  environment:
+    APP_ENV: production
+    AUTH_REQUIRED: "true"
+    AUTH_PRINCIPALS_JSON: !reset null
+    DATABASE_URL: !reset null
+    REDIS_URL: !reset null
+    TRACING_ENABLED: "true"
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+  entrypoint: ["/usr/local/bin/airgap-rag-entrypoint"]
+  secrets:
+    - postgres_password
+    - redis_password
+    - qdrant_api_key
+    - auth_principals_json
+  networks: [backend]
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  migrate:
+    <<: *app-production
+    build:
+      context: .
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app-production
+    command:
+      ["python", "-m", "uvicorn", "airgap_rag.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: !reset []
+    networks: [frontend, backend]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app-production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  scheduler:
+    <<: *app-production
+
+  outbox:
+    <<: *app-production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_DB: airgap_rag
+      POSTGRES_USER: airgap
+      POSTGRES_PASSWORD: !reset null
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  redis:
+    ports: !reset []
+    command:
+      - sh
+      - -ec
+      - exec redis-server --appendonly yes --requirepass "$$(cat /run/secrets/redis_password)"
+    secrets: [redis_password]
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" ping | grep PONG"]
+
+  qdrant:
+    ports: !reset []
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - export QDRANT__SERVICE__API_KEY="$$(cat /run/secrets/qdrant_api_key)"; exec /qdrant/entrypoint.sh
+    secrets: [qdrant_api_key]
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  ollama:
+    ports: !reset []
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  prometheus:
+    ports: !reset []
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  alertmanager:
+    ports: !reset []
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  jaeger:
+    ports: !reset []
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  grafana:
+    ports: !reset []
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: !reset null
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+    secrets: [grafana_admin_password]
+    networks: [backend]
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+
+  gateway:
+    image: nginx:1.28-alpine
+    ports:
+      - "${AIRGAP_HTTPS_PORT:-443}:8443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    secrets: [tls_certificate, tls_private_key]
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [frontend]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  frontend:
+  backend:
+    internal: true
+
+secrets:
+  postgres_password:
+    file: ${AIRGAP_SECRETS_DIR:-./.secrets}/postgres_password
+  redis_password:
+    file: ${AIRGAP_SECRETS_DIR:-./.secrets}/redis_password
+  qdrant_api_key:
+    file: ${AIRGAP_SECRETS_DIR:-./.secrets}/qdrant_api_key
+  auth_principals_json:
+    file: ${AIRGAP_SECRETS_DIR:-./.secrets}/auth_principals.json
+  grafana_admin_password:
+    file: ${AIRGAP_SECRETS_DIR:-./.secrets}/grafana_admin_password
+  tls_certificate:
+    file: ${AIRGAP_SECRETS_DIR:-./.secrets}/tls.crt
+  tls_private_key:
+    file: ${AIRGAP_SECRETS_DIR:-./.secrets}/tls.key

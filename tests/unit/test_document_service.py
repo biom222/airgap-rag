@@ -10,29 +10,37 @@ from starlette.datastructures import Headers
 
 from airgap_rag.db.models.documents import Document
 from airgap_rag.db.models.jobs import Job
+from airgap_rag.db.models.outbox import OutboxEvent
 from airgap_rag.documents.errors import DocumentTooLargeError
 from airgap_rag.documents.service import DocumentService
 from airgap_rag.documents.storage import LocalDocumentStore
 from airgap_rag.documents.types import DocumentStatus
 from airgap_rag.documents.validation import DocumentValidator
-from airgap_rag.jobs.errors import JobDispatchError
 from airgap_rag.jobs.types import JobStatus, JobType
-from tests.conftest import FakeJobPublisher
 
 
 class FakeDocumentRepository:
     def __init__(self) -> None:
         self.documents: dict[UUID, Document] = {}
         self.jobs: dict[UUID, Job] = {}
+        self.events: dict[UUID, OutboxEvent] = {}
         self.rollbacks = 0
 
-    async def find_by_sha256(self, sha256: str) -> Document | None:
+    async def find_by_sha256(self, owner_id: str, sha256: str) -> Document | None:
         return next(
-            (document for document in self.documents.values() if document.sha256 == sha256), None
+            (
+                document
+                for document in self.documents.values()
+                if document.owner_id == owner_id and document.sha256 == sha256
+            ),
+            None,
         )
 
-    async def get(self, document_id: UUID) -> Document | None:
-        return self.documents.get(document_id)
+    async def get(self, document_id: UUID, owner_id: str | None) -> Document | None:
+        document = self.documents.get(document_id)
+        if document is None or (owner_id is not None and document.owner_id != owner_id):
+            return None
+        return document
 
     async def find_latest_job(self, document_id: UUID) -> Job | None:
         return next(
@@ -40,19 +48,42 @@ class FakeDocumentRepository:
             None,
         )
 
-    async def save(self, document: Document, job: Job) -> None:
+    async def save(self, document: Document, job: Job, event: OutboxEvent) -> None:
         self.documents[document.id] = document
         self.jobs[job.id] = job
+        self.events[event.id] = event
+
+    async def ensure_outbox(
+        self,
+        job: Job,
+        *,
+        trace_id: str | None,
+        trace_context: dict[str, str],
+    ) -> None:
+        if any(event.aggregate_id == job.id for event in self.events.values()):
+            return
+        event = OutboxEvent(
+            event_type="ingestion.requested",
+            aggregate_id=job.id,
+            payload={
+                "job_id": str(job.id),
+                "trace_id": trace_id or "",
+                "trace_context": trace_context,
+            },
+            attempts=0,
+        )
+        self.events[event.id] = event
 
     async def rollback(self) -> None:
         self.rollbacks += 1
 
 
 class RacingDocumentRepository(FakeDocumentRepository):
-    async def save(self, document: Document, job: Job) -> None:
-        del job
+    async def save(self, document: Document, job: Job, event: OutboxEvent) -> None:
+        del job, event
         concurrent = Document(
             id=uuid4(),
+            owner_id=document.owner_id,
             filename="concurrent.txt",
             storage_key="documents/concurrent/file.txt",
             mime_type=document.mime_type,
@@ -85,20 +116,18 @@ def make_upload(filename: str, content: bytes, content_type: str) -> UploadFile:
 def make_service(
     runtime_path: Path,
     repository: FakeDocumentRepository,
-    publisher: FakeJobPublisher | None = None,
 ) -> DocumentService:
     return DocumentService(
         repository=repository,
         store=LocalDocumentStore(runtime_path, max_upload_bytes=1024, read_chunk_bytes=4),
         validator=DocumentValidator(max_docx_uncompressed_bytes=4096),
-        publisher=publisher or FakeJobPublisher(),
+        owner_id="test-user",
     )
 
 
 async def test_upload_stores_server_generated_file(runtime_path: Path) -> None:
     repository = FakeDocumentRepository()
-    publisher = FakeJobPublisher()
-    service = make_service(runtime_path, repository, publisher)
+    service = make_service(runtime_path, repository)
 
     result = await service.upload(make_upload("notes.txt", b"hello", "text/plain"))
 
@@ -109,7 +138,8 @@ async def test_upload_stores_server_generated_file(runtime_path: Path) -> None:
     )
     assert (runtime_path / result.document.storage_key).read_bytes() == b"hello"
     assert result.job.document_id == result.document.id
-    assert publisher.enqueued == [result.job.id]
+    assert result.document.owner_id == "test-user"
+    assert [event.aggregate_id for event in repository.events.values()] == [result.job.id]
 
 
 async def test_duplicate_upload_reuses_document(runtime_path: Path) -> None:
@@ -143,7 +173,7 @@ async def test_oversized_upload_cleans_staging(runtime_path: Path) -> None:
         repository=repository,
         store=LocalDocumentStore(runtime_path, max_upload_bytes=4, read_chunk_bytes=2),
         validator=DocumentValidator(max_docx_uncompressed_bytes=4096),
-        publisher=FakeJobPublisher(),
+        owner_id="test-user",
     )
 
     with pytest.raises(DocumentTooLargeError):
@@ -154,19 +184,15 @@ async def test_oversized_upload_cleans_staging(runtime_path: Path) -> None:
     assert repository.documents == {}
 
 
-async def test_dispatch_failure_keeps_pending_job_and_source_file(runtime_path: Path) -> None:
+async def test_upload_does_not_require_redis_and_persists_outbox(runtime_path: Path) -> None:
     repository = FakeDocumentRepository()
-    service = make_service(
-        runtime_path,
-        repository,
-        FakeJobPublisher(ConnectionError("redis unavailable")),
-    )
+    service = make_service(runtime_path, repository)
 
-    with pytest.raises(JobDispatchError):
-        await service.upload(make_upload("notes.txt", b"hello", "text/plain"))
+    result = await service.upload(make_upload("notes.txt", b"hello", "text/plain"))
 
     document = next(iter(repository.documents.values()))
     job = next(iter(repository.jobs.values()))
     assert document.status == DocumentStatus.PENDING
     assert job.status == JobStatus.PENDING
     assert (runtime_path / document.storage_key).read_bytes() == b"hello"
+    assert next(iter(repository.events.values())).aggregate_id == result.job.id

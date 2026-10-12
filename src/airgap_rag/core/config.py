@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     app_name: str = "AirGapRAG"
     app_env: Literal["development", "test", "production"] = "development"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    worker_metrics_host: str = "0.0.0.0"
+    worker_metrics_port: int = Field(default=9001, ge=1, le=65535)
+    auth_required: bool = False
+    auth_principals_json: str = "[]"
+    tracing_enabled: bool = False
+    otel_service_name: str = "airgap-rag-api"
+    otel_exporter_otlp_endpoint: str = "http://localhost:4318/v1/traces"
 
     database_url: str = "postgresql+asyncpg://airgap:airgap@localhost:5432/airgap_rag"
     database_pool_size: int = Field(default=5, ge=1)
@@ -60,6 +67,8 @@ class Settings(BaseSettings):
     job_retry_delay_seconds: int = Field(default=5, ge=1)
     job_retry_max_delay_seconds: int = Field(default=60, ge=1)
     job_stale_after_seconds: int = Field(default=960, ge=1)
+    outbox_poll_seconds: float = Field(default=1.0, gt=0, le=60)
+    outbox_batch_size: int = Field(default=50, ge=1, le=1000)
 
     llm_provider: Literal["mock", "ollama"] = "mock"
     ollama_base_url: str = "http://localhost:11434"
@@ -106,6 +115,13 @@ class Settings(BaseSettings):
             raise ValueError("OLLAMA_BASE_URL must use the http or https scheme")
         return value.rstrip("/")
 
+    @field_validator("otel_exporter_otlp_endpoint")
+    @classmethod
+    def validate_otel_endpoint(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("OTEL_EXPORTER_OTLP_ENDPOINT must use HTTP or HTTPS")
+        return value
+
     @field_validator("ollama_model", "ollama_keep_alive")
     @classmethod
     def validate_non_empty_llm_settings(cls, value: str) -> str:
@@ -126,6 +142,8 @@ class Settings(BaseSettings):
             raise ValueError("JOB_STALE_AFTER_SECONDS must be greater than JOB_TIMEOUT_SECONDS")
         if self.reranker_top_n > self.retrieval_top_k:
             raise ValueError("RERANKER_TOP_N must not exceed RETRIEVAL_TOP_K")
+        if self.app_env == "production" and not self.auth_required:
+            raise ValueError("AUTH_REQUIRED must be true in production")
         return self
 
 

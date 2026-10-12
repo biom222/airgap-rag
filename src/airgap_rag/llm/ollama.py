@@ -11,6 +11,7 @@ from airgap_rag.llm.base import (
     LLMResponseError,
     LLMUnavailableError,
 )
+from airgap_rag.metrics import MetricsRecorder
 
 
 class _OllamaMessage(BaseModel):
@@ -25,6 +26,7 @@ class _OllamaChatResponse(BaseModel):
 
     message: _OllamaMessage
     done: bool
+    eval_count: int | None = None
 
 
 class _OllamaModel(BaseModel):
@@ -53,12 +55,14 @@ class OllamaProvider:
         max_tokens: int,
         keep_alive: str,
         client: httpx.AsyncClient | None = None,
+        metrics: MetricsRecorder | None = None,
     ) -> None:
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._keep_alive = keep_alive
         self._owns_client = client is None
+        self._metrics = metrics
         self._client = client or httpx.AsyncClient(
             base_url=base_url,
             timeout=httpx.Timeout(timeout_seconds),
@@ -72,6 +76,8 @@ class OllamaProvider:
             raise LLMResponseError("Ollama returned an invalid chat response") from exc
         if not payload.done:
             raise LLMResponseError("Ollama returned an incomplete non-streaming response")
+        if self._metrics is not None and payload.eval_count is not None:
+            self._metrics.add_llm_tokens(payload.eval_count)
         return payload.message.content
 
     async def stream(self, messages: Sequence[LLMMessage]) -> AsyncIterator[str]:
@@ -93,6 +99,8 @@ class OllamaProvider:
                     if event.message.content:
                         yield event.message.content
                     if event.done:
+                        if self._metrics is not None and event.eval_count is not None:
+                            self._metrics.add_llm_tokens(event.eval_count)
                         completed = True
                         break
         except LLMProviderError:

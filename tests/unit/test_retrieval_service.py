@@ -59,7 +59,9 @@ class FakeSearchVectorStore:
         *,
         limit: int,
         document_ids: list[UUID] | None = None,
+        owner_id: str | None = None,
     ) -> list[VectorSearchResult]:
+        del owner_id
         self.document_ids = document_ids
         return self.hits[:limit]
 

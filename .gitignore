@@ -18,6 +18,8 @@ htmlcov/
 
 # Environment and secrets
 .env
+.secrets/
+backups/
 .env.*
 !.env.example
 *.pem

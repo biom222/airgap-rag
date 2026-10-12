@@ -7,14 +7,14 @@ from sqlalchemy.exc import IntegrityError
 
 from airgap_rag.db.models.documents import Document
 from airgap_rag.db.models.jobs import Job
+from airgap_rag.db.models.outbox import OutboxEvent
 from airgap_rag.db.repositories.documents import DocumentRepository
 from airgap_rag.documents.errors import DocumentNotFoundError
 from airgap_rag.documents.storage import LocalDocumentStore
 from airgap_rag.documents.types import DocumentStatus
 from airgap_rag.documents.validation import DocumentValidator
-from airgap_rag.jobs.errors import JobDispatchError
-from airgap_rag.jobs.service import JobPublisher
 from airgap_rag.jobs.types import JobStatus, JobType
+from airgap_rag.metrics import MetricsRecorder, NoOpMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,12 +30,20 @@ class DocumentService:
         repository: DocumentRepository,
         store: LocalDocumentStore,
         validator: DocumentValidator,
-        publisher: JobPublisher,
+        metrics: MetricsRecorder | None = None,
+        owner_id: str = "local-development",
+        can_manage_all: bool = False,
+        trace_id: str | None = None,
+        trace_context: dict[str, str] | None = None,
     ) -> None:
         self._repository = repository
         self._store = store
         self._validator = validator
-        self._publisher = publisher
+        self._metrics = metrics or NoOpMetrics()
+        self._owner_id = owner_id
+        self._can_manage_all = can_manage_all
+        self._trace_id = trace_id
+        self._trace_context = trace_context or {}
 
     async def upload(self, upload: UploadFile) -> UploadResult:
         staged = await self._store.stage(upload)
@@ -47,7 +55,7 @@ class DocumentService:
                 upload.filename,
                 upload.content_type,
             )
-            existing = await self._repository.find_by_sha256(staged.sha256)
+            existing = await self._repository.find_by_sha256(self._owner_id, staged.sha256)
             if existing is not None:
                 await self._store.discard(staged.path)
                 return await self._existing_upload(existing)
@@ -56,6 +64,7 @@ class DocumentService:
             storage_key = self._store.make_storage_key(document_id, staged.sha256, validated.suffix)
             document = Document(
                 id=document_id,
+                owner_id=self._owner_id,
                 filename=validated.filename,
                 storage_key=storage_key,
                 mime_type=validated.mime_type,
@@ -71,16 +80,28 @@ class DocumentService:
                 status=JobStatus.PENDING,
                 progress=0,
                 attempt=0,
+                trace_id=self._trace_id,
+            )
+            event = OutboxEvent(
+                id=uuid4(),
+                event_type="ingestion.requested",
+                aggregate_id=job.id,
+                payload={
+                    "job_id": str(job.id),
+                    "trace_id": self._trace_id or "",
+                    "trace_context": self._trace_context,
+                },
+                attempts=0,
             )
             await self._store.promote(staged.path, storage_key)
             promoted_storage_key = storage_key
             try:
-                await self._repository.save(document, job)
+                await self._repository.save(document, job, event)
             except IntegrityError:
                 await self._repository.rollback()
                 await self._store.delete(storage_key)
                 promoted_storage_key = None
-                concurrent = await self._repository.find_by_sha256(staged.sha256)
+                concurrent = await self._repository.find_by_sha256(self._owner_id, staged.sha256)
                 if concurrent is None:
                     raise
                 return await self._existing_upload(concurrent)
@@ -90,7 +111,7 @@ class DocumentService:
                 promoted_storage_key = None
                 raise
             promoted_storage_key = None
-            await self._dispatch(job.id)
+            self._metrics.record_document_created()
             return UploadResult(document=document, job=job, deduplicated=False)
         except Exception:
             await self._store.discard(staged.path)
@@ -103,17 +124,16 @@ class DocumentService:
         if job is None:
             raise RuntimeError(f"Document {document.id} has no ingestion job")
         if job.status == JobStatus.PENDING:
-            await self._dispatch(job.id)
+            await self._repository.ensure_outbox(
+                job,
+                trace_id=self._trace_id,
+                trace_context=self._trace_context,
+            )
         return UploadResult(document=document, job=job, deduplicated=True)
 
-    async def _dispatch(self, job_id: UUID) -> None:
-        try:
-            await self._publisher.enqueue_ingestion(job_id)
-        except Exception as error:
-            raise JobDispatchError() from error
-
     async def get(self, document_id: UUID) -> Document:
-        document = await self._repository.get(document_id)
+        owner_scope = None if self._can_manage_all else self._owner_id
+        document = await self._repository.get(document_id, owner_scope)
         if document is None:
             raise DocumentNotFoundError()
         return document

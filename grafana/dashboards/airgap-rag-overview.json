@@ -1,0 +1,87 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum(rate(http_requests_total[5m]))", "legendFormat": "requests"}],
+      "title": "HTTP request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}"}],
+      "title": "HTTP latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [{"expr": "sum by (mode, outcome) (rate(rag_requests_total[5m]))", "legendFormat": "{{mode}} {{outcome}}"}],
+      "title": "RAG request outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(embedding_duration_seconds_bucket[5m])))", "legendFormat": "embedding"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(retrieval_duration_seconds_bucket[5m])))", "legendFormat": "retrieval"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(reranking_duration_seconds_bucket[5m])))", "legendFormat": "reranking"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(llm_generation_duration_seconds_bucket[5m])))", "legendFormat": "generation"}
+      ],
+      "title": "RAG stage latency p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "id": 5,
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(llm_ttft_seconds_bucket[5m])))", "legendFormat": "TTFT p95"}],
+      "title": "LLM time to first token",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "id": 6,
+      "targets": [
+        {"expr": "sum(increase(document_ingestion_failures_total[1h]))", "legendFormat": "terminal ingestion failures"},
+        {"expr": "sum(increase(task_failures_total[1h]))", "legendFormat": "task attempts failed"}
+      ],
+      "title": "Background failures over 1h",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["airgap-rag"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {"text": "Prometheus", "value": "Prometheus"}
+      }
+    ]
+  },
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "AirGapRAG overview",
+  "uid": "airgap-rag-overview",
+  "version": 1
+}

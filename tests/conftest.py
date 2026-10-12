@@ -46,7 +46,9 @@ class FakeVectorStore:
         *,
         limit: int,
         document_ids: list[UUID] | None = None,
+        owner_id: str | None = None,
     ) -> list[VectorSearchResult]:
+        del owner_id
         return []
 
     async def healthcheck(self) -> bool:
@@ -61,7 +63,13 @@ class FakeJobPublisher(JobPublisher):
         self.error = error
         self.enqueued: list[UUID] = []
 
-    async def enqueue_ingestion(self, job_id: UUID) -> None:
+    async def enqueue_ingestion(
+        self,
+        job_id: UUID,
+        *,
+        trace_context: dict[str, str] | None = None,
+    ) -> None:
+        del trace_context
         if self.error is not None:
             raise self.error
         self.enqueued.append(job_id)

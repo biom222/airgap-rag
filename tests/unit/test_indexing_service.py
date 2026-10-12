@@ -39,7 +39,10 @@ class FakeIndexingRepository:
     async def replace_chunks(self, document_id: UUID, chunks: tuple[Chunk, ...]) -> None:
         self.chunks = chunks
 
-    async def get_chunks(self, chunk_ids: list[UUID]) -> dict[UUID, DocumentChunk]:
+    async def get_chunks(
+        self, chunk_ids: list[UUID], owner_id: str | None = None
+    ) -> dict[UUID, DocumentChunk]:
+        del owner_id
         return {}
 
     async def rollback(self) -> None:
@@ -84,7 +87,9 @@ class FakeIndexVectorStore:
         *,
         limit: int,
         document_ids: list[UUID] | None = None,
+        owner_id: str | None = None,
     ) -> list[VectorSearchResult]:
+        del owner_id
         return []
 
     async def healthcheck(self) -> bool:
@@ -103,6 +108,7 @@ def write_stored_document(root: Path, storage_key: str, content: str) -> None:
 def make_document() -> Document:
     return Document(
         id=uuid4(),
+        owner_id="test-user",
         filename="notes.txt",
         storage_key="documents/source/notes.txt",
         mime_type="text/plain",

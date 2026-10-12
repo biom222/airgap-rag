@@ -24,16 +24,18 @@ from airgap_rag.documents.types import DocumentStatus
 class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
+        UniqueConstraint("owner_id", "sha256", name="uq_documents_owner_sha256"),
         CheckConstraint("size > 0", name="ck_documents_size_positive"),
         CheckConstraint("page_count IS NULL OR page_count >= 0", name="ck_documents_page_count"),
     )
 
     id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), primary_key=True, default=uuid4)
+    owner_id: Mapped[str] = mapped_column(String(100), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    sha256: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[DocumentStatus] = mapped_column(
         Enum(
             DocumentStatus,

@@ -75,6 +75,7 @@ class IndexingService:
                         vector=vector,
                         payload={
                             "document_id": str(document.id),
+                            "owner_id": document.owner_id,
                             "chunk_id": str(chunk.id),
                             "filename": document.filename,
                             "page": chunk.page,

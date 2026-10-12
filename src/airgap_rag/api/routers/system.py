@@ -1,13 +1,17 @@
 import asyncio
 import logging
 from dataclasses import asdict
-from typing import Protocol, cast
+from typing import Annotated, Protocol, cast
 
-from fastapi import APIRouter, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Request, status
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
+from airgap_rag.api.dependencies.auth import get_current_principal
 from airgap_rag.api.schemas.system import HealthResponse, ReadinessResponse, SystemInfoResponse
+from airgap_rag.auth import Principal
 from airgap_rag.core.config import Settings
+from airgap_rag.metrics import ApplicationMetrics
 from airgap_rag.system_info import collect_hardware_info
 
 router = APIRouter(tags=["system"])
@@ -28,7 +32,11 @@ async def health() -> HealthResponse:
 
 
 @router.get("/system/info", response_model=SystemInfoResponse)
-async def system_info(request: Request) -> SystemInfoResponse:
+async def system_info(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> SystemInfoResponse:
+    del principal
     settings = cast(Settings, request.app.state.settings)
     hardware = collect_hardware_info()
     embedding_model = (
@@ -51,6 +59,15 @@ async def system_info(request: Request) -> SystemInfoResponse:
         embedding_model=embedding_model,
         reranker=reranker,
         airgap_mode=settings.airgap_mode,
+    )
+
+
+@router.get("/metrics", include_in_schema=False)
+async def prometheus_metrics(request: Request) -> Response:
+    metrics = cast(ApplicationMetrics, request.app.state.metrics)
+    return Response(
+        content=generate_latest(metrics.registry),
+        media_type=CONTENT_TYPE_LATEST,
     )
 
 

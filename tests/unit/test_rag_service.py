@@ -2,8 +2,10 @@ from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from uuid import UUID, uuid4
 
 import pytest
+from prometheus_client import generate_latest
 
 from airgap_rag.llm.base import LLMMessage, LLMUnavailableError
+from airgap_rag.metrics import ApplicationMetrics
 from airgap_rag.rag.errors import ChatSessionNotFoundError, LLMServiceUnavailableError
 from airgap_rag.rag.prompting import PromptBuilder
 from airgap_rag.rag.service import INSUFFICIENT_CONTEXT_ANSWER, RAGService
@@ -96,6 +98,7 @@ def make_service(
     chunks: list[RetrievedChunk],
     repository: FakeChatRepository,
     llm: RecordingLLMProvider,
+    metrics: ApplicationMetrics | None = None,
 ) -> RAGService:
     return RAGService(
         retrieval_service=StubRetrievalService(chunks),
@@ -103,6 +106,8 @@ def make_service(
         prompt_builder=PromptBuilder(4000),
         llm_provider=llm,
         history_limit=10,
+        metrics=metrics,
+        trace_id="test-trace",
     )
 
 
@@ -136,6 +141,37 @@ async def test_rag_answer_returns_server_derived_citations() -> None:
     assert result.session_id == repository.created_session_id
     assert repository.saved == [(None, "How long?", "Answer [S1]")]
     assert "Retention is five years." in llm.messages[-1].content
+
+
+async def test_rag_answer_records_request_and_generation_metrics() -> None:
+    chunk = RetrievedChunk(
+        document_id=uuid4(),
+        filename="policy.pdf",
+        page=1,
+        chunk_id=uuid4(),
+        chunk_index=0,
+        text="Context",
+        vector_score=0.9,
+    )
+    metrics = ApplicationMetrics()
+    service = make_service(
+        [chunk],
+        FakeChatRepository(history=[]),
+        RecordingLLMProvider(),
+        metrics,
+    )
+
+    await service.answer(
+        "Question",
+        session_id=None,
+        document_ids=None,
+        top_k=10,
+        top_n=5,
+    )
+
+    payload = generate_latest(metrics.registry).decode()
+    assert 'rag_requests_total{mode="sync",outcome="success"} 1.0' in payload
+    assert "llm_generation_duration_seconds_count 1.0" in payload
 
 
 async def test_rag_answer_does_not_call_llm_without_context() -> None:

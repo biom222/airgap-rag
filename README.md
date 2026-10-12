@@ -36,6 +36,12 @@ retrieval, reranking, local LLM providers и RAG API с citations.
 - `POST /api/v1/chat/stream` для SSE streaming с обработкой disconnect;
 - Dockerfile и Docker Compose для API, worker, scheduler, PostgreSQL, Qdrant и Redis;
 - воспроизводимые LLM и RAG benchmarks с JSON-отчётами;
+- Prometheus metrics, structured correlation logs и provisioned Grafana dashboard;
+- Bearer API-key authentication, роли `user/admin` и owner isolation;
+- transactional outbox между PostgreSQL и Redis/Taskiq;
+- OpenTelemetry tracing, Jaeger, Prometheus alerts и Alertmanager;
+- production Compose overlay с TLS gateway, Docker secrets и внутренней сетью;
+- проверяемые backup/restore и полное восстановление Qdrant через reindex;
 - pytest, Ruff, mypy, pre-commit и GitHub Actions.
 
 ## Архитектура
@@ -62,6 +68,8 @@ RAG pipeline: [docs/rag-pipeline.md](docs/rag-pipeline.md).
 SSE streaming: [docs/sse-streaming.md](docs/sse-streaming.md).
 Бенчмарки: [docs/benchmarking.md](docs/benchmarking.md).
 Квантизация: [docs/quantization.md](docs/quantization.md).
+Observability: [docs/observability.md](docs/observability.md).
+Production hardening: [docs/production-hardening.md](docs/production-hardening.md).
 
 ## Требования
 
@@ -138,9 +146,9 @@ curl -F "file=@./document.pdf" http://localhost:8000/api/v1/documents
 curl http://localhost:8000/api/v1/documents/<document_id>
 ```
 
-Upload не выполняет parsing и chunking внутри HTTP request. После фиксации
-metadata API отправляет `job_id` в Redis, а Taskiq worker запускает полный
-pipeline. Состояние задания:
+Upload не выполняет parsing и chunking внутри HTTP request. Metadata, job и
+outbox event фиксируются одной транзакцией PostgreSQL. Outbox dispatcher
+доставляет `job_id` в Redis, а Taskiq worker запускает полный pipeline. Состояние задания:
 
 ```bash
 curl http://localhost:8000/api/v1/jobs/<job_id>
@@ -261,6 +269,18 @@ python -m mypy
 python -m pytest
 ```
 
+## Observability
+
+Prometheus и Grafana запускаются отдельным Compose profile:
+
+```bash
+docker compose --profile observability up -d --build
+```
+
+API metrics доступны на `http://127.0.0.1:8000/metrics`, Grafana — на
+`http://127.0.0.1:3000`. Перед сетевым развёртыванием замените
+`GRAFANA_ADMIN_PASSWORD`. Подробности: [docs/observability.md](docs/observability.md).
+
 ## Конфигурация
 
 | Переменная | Назначение | Значение по умолчанию |
@@ -268,6 +288,8 @@ python -m pytest
 | `APP_NAME` | Название приложения | `AirGapRAG` |
 | `APP_ENV` | `development`, `test`, `production` | `development` |
 | `LOG_LEVEL` | Уровень логирования | `INFO` |
+| `WORKER_METRICS_HOST` | Адрес metrics server worker | `0.0.0.0` |
+| `WORKER_METRICS_PORT` | Внутренний metrics port worker | `9001` |
 | `DATABASE_URL` | Async SQLAlchemy URL | локальный PostgreSQL |
 | `DATABASE_POOL_SIZE` | Основной размер pool | `5` |
 | `DATABASE_MAX_OVERFLOW` | Дополнительные соединения | `5` |
@@ -326,7 +348,10 @@ src/airgap_rag/reranking/ reranker contracts and adapters
 src/airgap_rag/rag/       prompt construction and RAG orchestration
 src/airgap_rag/evaluation/ retrieval quality metrics, API client and reports
 src/airgap_rag/benchmarks/ LLM и RAG benchmark runners
+src/airgap_rag/metrics/ Prometheus instruments
 benchmarks/             CLI entry points и локальные результаты
+prometheus/             scrape configuration
+grafana/                datasource и dashboard provisioning
 src/airgap_rag/jobs/      job state machine, broker and worker tasks
 src/airgap_rag/llm/       LLM provider contract, mock and Ollama adapter
 alembic/               database migrations
@@ -358,7 +383,7 @@ docs/                  Russian technical documentation and ADR
 - [x] SSE streaming
 - [x] Evaluation
 - [x] Benchmarking
-- [ ] Observability
+- [x] Observability
 - [ ] Air-gapped deployment
 - [ ] Additional inference runtimes
 - [ ] Optional UI

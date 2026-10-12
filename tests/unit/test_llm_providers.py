@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+from prometheus_client import generate_latest
 
 from airgap_rag.core.config import Settings
 from airgap_rag.llm.base import (
@@ -14,9 +15,13 @@ from airgap_rag.llm.base import (
 from airgap_rag.llm.factory import create_llm_provider
 from airgap_rag.llm.mock import MockLLMProvider
 from airgap_rag.llm.ollama import OllamaProvider
+from airgap_rag.metrics import ApplicationMetrics
 
 
-def make_provider(handler: httpx.AsyncBaseTransport) -> OllamaProvider:
+def make_provider(
+    handler: httpx.AsyncBaseTransport,
+    metrics: ApplicationMetrics | None = None,
+) -> OllamaProvider:
     client = httpx.AsyncClient(transport=handler, base_url="http://ollama:11434")
     return OllamaProvider(
         base_url="http://unused:11434",
@@ -26,6 +31,7 @@ def make_provider(handler: httpx.AsyncBaseTransport) -> OllamaProvider:
         max_tokens=128,
         keep_alive="5m",
         client=client,
+        metrics=metrics,
     )
 
 
@@ -90,6 +96,31 @@ async def test_ollama_stream_yields_content_until_done() -> None:
     parts = await collect(provider.stream([LLMMessage(role="user", content="Question")]))
 
     assert parts == ["Part 1", " Part 2"]
+
+
+async def test_ollama_stream_records_runtime_token_count() -> None:
+    metrics = ApplicationMetrics()
+    body = "\n".join(
+        [
+            json.dumps({"message": {"role": "assistant", "content": "Answer"}, "done": False}),
+            json.dumps(
+                {
+                    "message": {"role": "assistant", "content": ""},
+                    "done": True,
+                    "eval_count": 7,
+                }
+            ),
+        ]
+    )
+    provider = make_provider(
+        httpx.MockTransport(lambda request: httpx.Response(200, text=body)),
+        metrics,
+    )
+
+    await collect(provider.stream([LLMMessage(role="user", content="Question")]))
+
+    payload = generate_latest(metrics.registry).decode()
+    assert "llm_tokens_generated_total 7.0" in payload
 
 
 async def test_ollama_stream_rejects_missing_done_event() -> None:

@@ -11,6 +11,7 @@ from airgap_rag.embeddings.factory import create_embedding_provider
 from airgap_rag.jobs.service import JobPublisher
 from airgap_rag.llm.base import LLMProvider
 from airgap_rag.llm.factory import create_llm_provider
+from airgap_rag.metrics import MetricsRecorder
 from airgap_rag.reranking.base import Reranker
 from airgap_rag.reranking.factory import create_reranker
 from airgap_rag.vector_store.base import VectorStore
@@ -40,10 +41,11 @@ def create_lifespan(
     task_broker: TaskBroker | None = None,
     llm_provider: LLMProvider | None = None,
     reranker: Reranker | None = None,
+    metrics: MetricsRecorder | None = None,
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
     resolved_embedding_provider = embedding_provider or create_embedding_provider(settings)
     resolved_vector_store = vector_store or create_vector_store(settings)
-    resolved_llm_provider = llm_provider or create_llm_provider(settings)
+    resolved_llm_provider = llm_provider or create_llm_provider(settings, metrics=metrics)
     resolved_reranker = reranker or create_reranker(settings)
 
     @asynccontextmanager
@@ -66,6 +68,9 @@ def create_lifespan(
             await resolved_llm_provider.close()
             await resolved_vector_store.close()
             await database.dispose()
+            tracing_runtime = getattr(app.state, "tracing_runtime", None)
+            if tracing_runtime is not None:
+                tracing_runtime.shutdown()
             logger.info("application_stopped")
 
     return lifespan

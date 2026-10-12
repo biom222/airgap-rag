@@ -13,10 +13,12 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY scripts/docker-entrypoint.sh /usr/local/bin/airgap-rag-entrypoint
 
 RUN python -m pip install --no-cache-dir . \
     && mkdir -p /data/documents \
-    && chown -R airgap:airgap /data/documents
+    && chown -R airgap:airgap /data/documents \
+    && chmod 0555 /usr/local/bin/airgap-rag-entrypoint
 
 USER airgap
 

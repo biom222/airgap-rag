@@ -1,4 +1,4 @@
-.PHONY: install lint format typecheck test evaluate benchmark-llm benchmark-rag run migrate compose-up compose-down
+.PHONY: install lint format typecheck test evaluate benchmark-llm benchmark-rag run migrate compose-up compose-down observability-up observability-down production-init production-up production-down backup reindex
 
 install:
 	python -m pip install -e ".[dev]"
@@ -37,3 +37,24 @@ compose-up:
 
 compose-down:
 	docker compose down
+
+observability-up:
+	docker compose --profile observability up -d --build
+
+observability-down:
+	docker compose --profile observability down
+
+production-init:
+	powershell -ExecutionPolicy Bypass -File scripts/initialize-production.ps1
+
+production-up:
+	docker compose -f docker-compose.yml -f docker-compose.production.yml --profile observability up -d --build
+
+production-down:
+	docker compose -f docker-compose.yml -f docker-compose.production.yml --profile observability down
+
+backup:
+	powershell -ExecutionPolicy Bypass -File scripts/backup.ps1
+
+reindex:
+	powershell -ExecutionPolicy Bypass -File scripts/reindex.ps1

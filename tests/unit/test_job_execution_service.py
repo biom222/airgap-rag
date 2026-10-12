@@ -24,6 +24,10 @@ class FakeJobRepository:
     async def get(self, job_id: UUID) -> Job | None:
         return self.job if self.job.id == job_id else None
 
+    async def get_for_owner(self, job_id: UUID, owner_id: str | None) -> Job | None:
+        del owner_id
+        return await self.get(job_id)
+
     async def claim(self, job_id: UUID, *, stale_after_seconds: int) -> ClaimedJob | None:
         del stale_after_seconds
         if not self.claimable or job_id != self.job.id:
@@ -92,6 +96,7 @@ def make_models(*, attempt: int = 0) -> tuple[Job, Document]:
     now = datetime.now(UTC)
     document = Document(
         id=uuid4(),
+        owner_id="test-user",
         filename="notes.txt",
         storage_key="documents/id/notes.txt",
         mime_type="text/plain",

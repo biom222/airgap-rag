@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: AirGapRAG
+    orgId: 1
+    folder: AirGapRAG
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

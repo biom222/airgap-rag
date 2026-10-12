@@ -26,7 +26,9 @@ class IndexingRepository(Protocol):
 
     async def replace_chunks(self, document_id: UUID, chunks: tuple[Chunk, ...]) -> None: ...
 
-    async def get_chunks(self, chunk_ids: list[UUID]) -> dict[UUID, DocumentChunk]: ...
+    async def get_chunks(
+        self, chunk_ids: list[UUID], owner_id: str | None = None
+    ) -> dict[UUID, DocumentChunk]: ...
 
     async def rollback(self) -> None: ...
 
@@ -75,12 +77,15 @@ class SQLAlchemyIndexingRepository:
         )
         await self._session.commit()
 
-    async def get_chunks(self, chunk_ids: list[UUID]) -> dict[UUID, DocumentChunk]:
+    async def get_chunks(
+        self, chunk_ids: list[UUID], owner_id: str | None = None
+    ) -> dict[UUID, DocumentChunk]:
         if not chunk_ids:
             return {}
-        result = await self._session.execute(
-            select(DocumentChunk).where(DocumentChunk.id.in_(chunk_ids))
-        )
+        statement = select(DocumentChunk).where(DocumentChunk.id.in_(chunk_ids))
+        if owner_id is not None:
+            statement = statement.join(Document).where(Document.owner_id == owner_id)
+        result = await self._session.execute(statement)
         return {chunk.id: chunk for chunk in result.scalars()}
 
     async def rollback(self) -> None:
@@ -90,9 +95,10 @@ class SQLAlchemyIndexingRepository:
 class SessionChunkRepository:
     """Loads retrieval chunks without holding a transaction during LLM inference."""
 
-    def __init__(self, database: AsyncSessionProvider) -> None:
+    def __init__(self, database: AsyncSessionProvider, owner_id: str | None = None) -> None:
         self._database = database
+        self._owner_id = owner_id
 
     async def get_chunks(self, chunk_ids: list[UUID]) -> dict[UUID, DocumentChunk]:
         async with self._database.session() as session:
-            return await SQLAlchemyIndexingRepository(session).get_chunks(chunk_ids)
+            return await SQLAlchemyIndexingRepository(session).get_chunks(chunk_ids, self._owner_id)

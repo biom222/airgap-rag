@@ -16,9 +16,31 @@ async def test_health_returns_ok(client: AsyncClient) -> None:
 
 
 async def test_health_preserves_client_request_id(client: AsyncClient) -> None:
-    response = await client.get("/health", headers={"X-Request-ID": "request-from-client"})
+    response = await client.get(
+        "/health",
+        headers={
+            "X-Request-ID": "request-from-client",
+            "X-Correlation-ID": "trace-from-client",
+        },
+    )
 
     assert response.headers["X-Request-ID"] == "request-from-client"
+    assert response.headers["X-Correlation-ID"] == "trace-from-client"
+
+
+async def test_metrics_exposes_http_counters_with_route_templates(client: AsyncClient) -> None:
+    await client.get("/health")
+    await client.get("/does-not-exist/123")
+
+    response = await client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert (
+        'http_requests_total{method="GET",route="/health",status_code="200"} 1.0' in response.text
+    )
+    assert 'route="unmatched"' in response.text
+    assert "/does-not-exist/123" not in response.text
 
 
 async def test_system_info_reports_runtime_and_selected_providers(client: AsyncClient) -> None:

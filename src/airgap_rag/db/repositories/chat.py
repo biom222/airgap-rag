@@ -28,8 +28,23 @@ class ChatRepository(Protocol):
 
 
 class SQLAlchemyChatRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        owner_id: str,
+        can_manage_all: bool = False,
+    ) -> None:
         self._session = session
+        self._owner_id = owner_id
+        self._can_manage_all = can_manage_all
+
+    async def _get_session(self, session_id: UUID) -> ChatSession | None:
+        statement = select(ChatSession).where(ChatSession.id == session_id)
+        if not self._can_manage_all:
+            statement = statement.where(ChatSession.owner_id == self._owner_id)
+        result = await self._session.execute(statement)
+        return result.scalar_one_or_none()
 
     async def get_history(
         self,
@@ -37,7 +52,7 @@ class SQLAlchemyChatRepository:
         *,
         limit: int,
     ) -> list[ChatHistoryMessage] | None:
-        if await self._session.get(ChatSession, session_id) is None:
+        if await self._get_session(session_id) is None:
             return None
         role_order = case((ChatMessage.role == ChatRole.ASSISTANT, 1), else_=0)
         result = await self._session.execute(
@@ -59,11 +74,11 @@ class SQLAlchemyChatRepository:
         assistant_content: str,
     ) -> UUID:
         if session_id is None:
-            chat_session = ChatSession()
+            chat_session = ChatSession(owner_id=self._owner_id)
             self._session.add(chat_session)
             await self._session.flush()
             session_id = chat_session.id
-        elif await self._session.get(ChatSession, session_id) is None:
+        elif await self._get_session(session_id) is None:
             raise ChatSessionNotFoundError()
 
         self._session.add_all(
@@ -87,8 +102,23 @@ class SQLAlchemyChatRepository:
 class SessionChatRepository:
     """Runs each chat operation in a short independent database session."""
 
-    def __init__(self, database: AsyncSessionProvider) -> None:
+    def __init__(
+        self,
+        database: AsyncSessionProvider,
+        *,
+        owner_id: str = "local-development",
+        can_manage_all: bool = False,
+    ) -> None:
         self._database = database
+        self._owner_id = owner_id
+        self._can_manage_all = can_manage_all
+
+    def _repository(self, session: AsyncSession) -> SQLAlchemyChatRepository:
+        return SQLAlchemyChatRepository(
+            session,
+            owner_id=self._owner_id,
+            can_manage_all=self._can_manage_all,
+        )
 
     async def get_history(
         self,
@@ -97,7 +127,7 @@ class SessionChatRepository:
         limit: int,
     ) -> list[ChatHistoryMessage] | None:
         async with self._database.session() as session:
-            return await SQLAlchemyChatRepository(session).get_history(session_id, limit=limit)
+            return await self._repository(session).get_history(session_id, limit=limit)
 
     async def save_exchange(
         self,
@@ -107,7 +137,7 @@ class SessionChatRepository:
         assistant_content: str,
     ) -> UUID:
         async with self._database.session() as session:
-            return await SQLAlchemyChatRepository(session).save_exchange(
+            return await self._repository(session).save_exchange(
                 session_id,
                 user_content=user_content,
                 assistant_content=assistant_content,

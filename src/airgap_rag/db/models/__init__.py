@@ -1,6 +1,15 @@
 from airgap_rag.db.models.chat import ChatMessage, ChatSession
 from airgap_rag.db.models.documents import Document, DocumentChunk
 from airgap_rag.db.models.jobs import Job
+from airgap_rag.db.models.outbox import OutboxEvent
 
-__all__ = ["ChatMessage", "ChatSession", "Document", "DocumentChunk", "Job", "ModelBenchmark"]
+__all__ = [
+    "ChatMessage",
+    "ChatSession",
+    "Document",
+    "DocumentChunk",
+    "Job",
+    "ModelBenchmark",
+    "OutboxEvent",
+]
 from airgap_rag.db.models.benchmarks import ModelBenchmark

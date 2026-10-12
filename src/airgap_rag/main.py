@@ -8,13 +8,16 @@ from airgap_rag.api.routers.documents import router as documents_router
 from airgap_rag.api.routers.jobs import router as jobs_router
 from airgap_rag.api.routers.retrieval import router as retrieval_router
 from airgap_rag.api.routers.system import router as system_router
+from airgap_rag.auth import Authenticator
 from airgap_rag.core.config import Settings, get_settings
 from airgap_rag.core.lifecycle import DisposableDatabase, TaskBroker, create_lifespan
 from airgap_rag.core.logging import configure_logging
+from airgap_rag.core.tracing import configure_tracing
 from airgap_rag.db.session import Database
 from airgap_rag.embeddings.base import EmbeddingProvider
 from airgap_rag.jobs.service import JobPublisher
 from airgap_rag.llm.base import LLMProvider
+from airgap_rag.metrics import ApplicationMetrics
 from airgap_rag.reranking.base import Reranker
 from airgap_rag.vector_store.base import VectorStore
 
@@ -30,6 +33,7 @@ def create_app(
     reranker: Reranker | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
+    metrics = ApplicationMetrics()
     configure_logging(resolved_settings.log_level)
     resolved_database = database or Database(resolved_settings)
     resolved_job_publisher = job_publisher
@@ -44,6 +48,9 @@ def create_app(
     application = FastAPI(
         title=resolved_settings.app_name,
         version=__version__,
+        docs_url=None if resolved_settings.app_env == "production" else "/docs",
+        redoc_url=None if resolved_settings.app_env == "production" else "/redoc",
+        openapi_url=None if resolved_settings.app_env == "production" else "/openapi.json",
         lifespan=create_lifespan(
             resolved_settings,
             resolved_database,
@@ -53,7 +60,19 @@ def create_app(
             resolved_task_broker,
             llm_provider,
             reranker,
+            metrics,
         ),
+    )
+    application.state.metrics = metrics
+    application.state.authenticator = Authenticator(
+        required=resolved_settings.auth_required,
+        principals_json=resolved_settings.auth_principals_json,
+    )
+    engine = getattr(resolved_database, "engine", None)
+    application.state.tracing_runtime = configure_tracing(
+        resolved_settings,
+        app=application,
+        sqlalchemy_engine=getattr(engine, "sync_engine", None),
     )
     application.add_middleware(RequestContextMiddleware)
     application.include_router(system_router)

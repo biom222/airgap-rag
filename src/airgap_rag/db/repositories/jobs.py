@@ -22,6 +22,8 @@ class ClaimedJob:
 class JobRepository(Protocol):
     async def get(self, job_id: UUID) -> Job | None: ...
 
+    async def get_for_owner(self, job_id: UUID, owner_id: str | None) -> Job | None: ...
+
     async def claim(self, job_id: UUID, *, stale_after_seconds: int) -> ClaimedJob | None: ...
 
     async def prepare_retry(
@@ -49,6 +51,13 @@ class SQLAlchemyJobRepository:
 
     async def get(self, job_id: UUID) -> Job | None:
         return await self._session.get(Job, job_id)
+
+    async def get_for_owner(self, job_id: UUID, owner_id: str | None) -> Job | None:
+        statement = select(Job).where(Job.id == job_id)
+        if owner_id is not None:
+            statement = statement.join(Document).where(Document.owner_id == owner_id)
+        result = await self._session.execute(statement)
+        return result.scalar_one_or_none()
 
     async def claim(self, job_id: UUID, *, stale_after_seconds: int) -> ClaimedJob | None:
         result = await self._session.execute(select(Job).where(Job.id == job_id).with_for_update())

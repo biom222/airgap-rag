@@ -1,9 +1,11 @@
 from collections.abc import AsyncIterator
-from typing import cast
+from typing import Annotated, cast
 
-from fastapi import Request
+from fastapi import Depends, Request
 
+from airgap_rag.api.dependencies.auth import get_current_principal
 from airgap_rag.api.dependencies.documents import SessionDatabase
+from airgap_rag.auth import Principal
 from airgap_rag.db.repositories.indexing import SQLAlchemyIndexingRepository
 from airgap_rag.embeddings.base import EmbeddingProvider
 from airgap_rag.reranking.base import Reranker
@@ -11,7 +13,10 @@ from airgap_rag.retrieval.service import RetrievalService
 from airgap_rag.vector_store.base import VectorStore
 
 
-async def get_retrieval_service(request: Request) -> AsyncIterator[RetrievalService]:
+async def get_retrieval_service(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> AsyncIterator[RetrievalService]:
     database = cast(SessionDatabase, request.app.state.database)
     embedding_provider = cast(EmbeddingProvider, request.app.state.embedding_provider)
     vector_store = cast(VectorStore, request.app.state.vector_store)
@@ -22,4 +27,5 @@ async def get_retrieval_service(request: Request) -> AsyncIterator[RetrievalServ
             embedding_provider=embedding_provider,
             vector_store=vector_store,
             reranker=reranker,
+            owner_id=None if principal.is_admin else principal.subject,
         )

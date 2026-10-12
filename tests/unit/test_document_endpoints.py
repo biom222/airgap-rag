@@ -34,6 +34,7 @@ def make_document() -> Document:
     now = datetime.now(UTC)
     return Document(
         id=uuid4(),
+        owner_id="test-user",
         filename="notes.txt",
         storage_key="documents/id/hash.txt",
         mime_type="text/plain",

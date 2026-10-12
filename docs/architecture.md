@@ -2,9 +2,9 @@
 
 ## Текущий этап
 
-На PHASE 7 реализованы foundation, ingestion, indexing, background jobs,
-retrieval, optional reranking, local LLM provider boundary, RAG API и SSE
-streaming с обработкой disconnect.
+На PHASE 10 реализованы foundation, ingestion, indexing, background jobs,
+retrieval, optional reranking, local LLM, RAG API, SSE, evaluation,
+benchmarking и observability.
 
 ## Направление зависимостей
 
@@ -166,3 +166,13 @@ iterator. Частичная генерация не сохраняется.
 
 Подробнее: [rag-pipeline.md](rag-pipeline.md).
 Формат потока: [sse-streaming.md](sse-streaming.md).
+
+## Observability boundary
+
+API и worker имеют независимые Prometheus registries. API отдаёт `/metrics`, а
+worker — внутренний metrics endpoint. Prometheus собирает оба target, Grafana
+использует provisioned datasource и dashboard. Request и RAG logs связываются
+через `trace_id`, background execution — через `job_id`. UUID и confidential
+content не используются как Prometheus labels.
+
+Подробнее: [observability.md](observability.md).

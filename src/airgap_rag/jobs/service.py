@@ -2,6 +2,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
+from time import perf_counter
 from typing import Protocol
 from uuid import UUID
 
@@ -13,12 +14,18 @@ from airgap_rag.documents.errors import DocumentParseError
 from airgap_rag.embeddings.base import EmbeddingProviderError
 from airgap_rag.indexing.service import DocumentIndexingError, IndexingService
 from airgap_rag.jobs.errors import JobNotFoundError, RetryableJobError
+from airgap_rag.metrics import MetricsRecorder, NoOpMetrics
 
 logger = logging.getLogger(__name__)
 
 
 class JobPublisher(Protocol):
-    async def enqueue_ingestion(self, job_id: UUID) -> None: ...
+    async def enqueue_ingestion(
+        self,
+        job_id: UUID,
+        *,
+        trace_context: dict[str, str] | None = None,
+    ) -> None: ...
 
 
 class JobExecutionOutcome(StrEnum):
@@ -35,11 +42,12 @@ class FailureDetails:
 
 
 class JobQueryService:
-    def __init__(self, repository: JobRepository) -> None:
+    def __init__(self, repository: JobRepository, owner_id: str | None = None) -> None:
         self._repository = repository
+        self._owner_id = owner_id
 
     async def get(self, job_id: UUID) -> Job:
-        job = await self._repository.get(job_id)
+        job = await self._repository.get_for_owner(job_id, self._owner_id)
         if job is None:
             raise JobNotFoundError()
         return job
@@ -54,12 +62,14 @@ class JobExecutionService:
         max_attempts: int,
         timeout_seconds: int,
         stale_after_seconds: int,
+        metrics: MetricsRecorder | None = None,
     ) -> None:
         self._repository = repository
         self._indexing_service = indexing_service
         self._max_attempts = max_attempts
         self._timeout_seconds = timeout_seconds
         self._stale_after_seconds = stale_after_seconds
+        self._metrics = metrics or NoOpMetrics()
 
     async def execute(self, job_id: UUID) -> JobExecutionOutcome:
         claimed = await self._repository.claim(
@@ -72,6 +82,16 @@ class JobExecutionService:
         job_id = claimed.job.id
         document_id = claimed.document.id
         attempt = claimed.job.attempt
+        started_at = perf_counter()
+        logger.info(
+            "ingestion_job_started",
+            extra={
+                "job_id": str(job_id),
+                "document_id": str(document_id),
+                "trace_id": claimed.job.trace_id,
+                "attempt": attempt,
+            },
+        )
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 await self._indexing_service.index_document(
@@ -81,6 +101,7 @@ class JobExecutionService:
         except Exception as error:
             await self._repository.rollback()
             failure = classify_job_failure(error)
+            self._metrics.record_task_failure(failure.retryable)
             message = _safe_error_message(failure.message)
             if failure.retryable and attempt < self._max_attempts:
                 await self._repository.prepare_retry(
@@ -93,8 +114,10 @@ class JobExecutionService:
                     extra={
                         "job_id": str(job_id),
                         "document_id": str(document_id),
+                        "trace_id": claimed.job.trace_id,
                         "attempt": attempt,
                         "error_code": failure.code,
+                        "duration_ms": round((perf_counter() - started_at) * 1000, 3),
                     },
                 )
                 raise RetryableJobError(message) from error
@@ -104,14 +127,17 @@ class JobExecutionService:
                 error_code=failure.code,
                 error_message=message,
             )
+            self._metrics.record_ingestion_failure()
             logger.error(
                 "ingestion_job_failed",
                 extra={
                     "job_id": str(job_id),
                     "document_id": str(document_id),
+                    "trace_id": claimed.job.trace_id,
                     "attempt": attempt,
                     "error_code": failure.code,
                     "retryable": failure.retryable,
+                    "duration_ms": round((perf_counter() - started_at) * 1000, 3),
                 },
             )
             return JobExecutionOutcome.FAILED
@@ -121,7 +147,9 @@ class JobExecutionService:
             extra={
                 "job_id": str(job_id),
                 "document_id": str(document_id),
+                "trace_id": claimed.job.trace_id,
                 "attempt": attempt,
+                "duration_ms": round((perf_counter() - started_at) * 1000, 3),
             },
         )
         return JobExecutionOutcome.COMPLETED

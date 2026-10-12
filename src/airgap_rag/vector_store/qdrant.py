@@ -59,6 +59,12 @@ class QdrantVectorStore:
             field_schema=models.PayloadSchemaType.UUID,
             wait=True,
         )
+        await self._client.create_payload_index(
+            collection_name=self._collection_name,
+            field_name="owner_id",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+            wait=True,
+        )
         self._dimension = dimension
 
     async def delete_document(self, document_id: UUID) -> None:
@@ -104,17 +110,24 @@ class QdrantVectorStore:
         *,
         limit: int,
         document_ids: list[UUID] | None = None,
+        owner_id: str | None = None,
     ) -> list[VectorSearchResult]:
-        query_filter = None
+        conditions: list[models.Condition] = []
         if document_ids:
-            query_filter = models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="document_id",
-                        match=models.MatchAny(any=[str(item) for item in document_ids]),
-                    )
-                ]
+            conditions.append(
+                models.FieldCondition(
+                    key="document_id",
+                    match=models.MatchAny(any=[str(item) for item in document_ids]),
+                )
             )
+        if owner_id is not None:
+            conditions.append(
+                models.FieldCondition(
+                    key="owner_id",
+                    match=models.MatchValue(value=owner_id),
+                )
+            )
+        query_filter = models.Filter(must=conditions) if conditions else None
 
         response = await self._client.query_points(
             collection_name=self._collection_name,

@@ -4,12 +4,18 @@ x-app-environment: &app-environment
   DOCUMENT_STORAGE_PATH: /data/documents
   EMBEDDING_PROVIDER: mock
   LOG_LEVEL: INFO
+  AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+  AUTH_PRINCIPALS_JSON: ${AUTH_PRINCIPALS_JSON:-[]}
+  TRACING_ENABLED: ${TRACING_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318/v1/traces}
   LLM_PROVIDER: ${LLM_PROVIDER:-mock}
   LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-1024}
   LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-120}
   LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
   RAG_CONTEXT_MAX_CHARACTERS: ${RAG_CONTEXT_MAX_CHARACTERS:-16000}
   CHAT_HISTORY_MAX_MESSAGES: ${CHAT_HISTORY_MAX_MESSAGES:-10}
+  WORKER_METRICS_HOST: 0.0.0.0
+  WORKER_METRICS_PORT: 9001
   OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
   OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
   OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
@@ -28,7 +34,7 @@ services:
       context: .
     environment: *app-environment
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,6 +56,8 @@ services:
       start_period: 5s
     volumes:
       - document_data:/data/documents
+    expose:
+      - "9001"
 
   worker:
     build:
@@ -74,6 +82,17 @@ services:
     volumes:
       - document_data:/data/documents
 
+  outbox:
+    build:
+      context: .
+    command: ["python", "-m", "airgap_rag.jobs.outbox_worker"]
+    environment: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   scheduler:
     build:
       context: .
@@ -95,7 +114,7 @@ services:
       POSTGRES_USER: airgap
       POSTGRES_PASSWORD: airgap
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -107,15 +126,15 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.19.1
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
 
   redis:
     image: redis:8.2-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -129,7 +148,7 @@ services:
     image: ollama/ollama:0.12.11
     profiles: ["ollama"]
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
@@ -138,9 +157,74 @@ services:
       timeout: 5s
       retries: 10
 
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      alertmanager:
+        condition: service_started
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: ["observability"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"
+    expose:
+      - "4318"
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-before-production}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
 volumes:
   postgres_data:
   document_data:
   qdrant_data:
   redis_data:
   ollama_data:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:

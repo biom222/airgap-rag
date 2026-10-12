@@ -23,18 +23,28 @@ async def test_qdrant_store_upserts_filters_and_deletes() -> None:
                 VectorPoint(
                     id=first_chunk,
                     vector=[1.0, 0.0, 0.0],
-                    payload={"document_id": str(first_document), "filename": "first.txt"},
+                    payload={
+                        "document_id": str(first_document),
+                        "owner_id": "alice",
+                        "filename": "first.txt",
+                    },
                 ),
                 VectorPoint(
                     id=second_chunk,
                     vector=[0.0, 1.0, 0.0],
-                    payload={"document_id": str(second_document), "filename": "second.txt"},
+                    payload={
+                        "document_id": str(second_document),
+                        "owner_id": "bob",
+                        "filename": "second.txt",
+                    },
                 ),
             ]
         )
 
         results = await store.search([1.0, 0.0, 0.0], limit=5, document_ids=[first_document])
         assert [result.id for result in results] == [first_chunk]
+        owner_results = await store.search([1.0, 0.0, 0.0], limit=5, owner_id="alice")
+        assert [result.id for result in owner_results] == [first_chunk]
 
         await store.delete_document(first_document)
         remaining = await store.search([1.0, 0.0, 0.0], limit=5)

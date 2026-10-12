@@ -30,6 +30,7 @@ class VectorStore(Protocol):
         *,
         limit: int,
         document_ids: list[UUID] | None = None,
+        owner_id: str | None = None,
     ) -> list[VectorSearchResult]: ...
 
     async def healthcheck(self) -> bool: ...
