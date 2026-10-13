@@ -10,7 +10,7 @@ from airgap_rag.core.config import Settings
 from airgap_rag.db.models.documents import Document
 from airgap_rag.db.models.jobs import Job
 from airgap_rag.documents.service import DocumentService, UploadResult
-from airgap_rag.documents.types import DocumentStatus
+from airgap_rag.documents.types import DocumentMetadata, DocumentStatus
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
 from airgap_rag.jobs.types import JobStatus, JobType
 from airgap_rag.main import create_app
@@ -23,7 +23,10 @@ class StubDocumentService(DocumentService):
         self.job = job
         self.deduplicated = deduplicated
 
-    async def upload(self, upload: UploadFile) -> UploadResult:
+    async def upload(
+        self, upload: UploadFile, metadata: DocumentMetadata | None = None
+    ) -> UploadResult:
+        del metadata
         return UploadResult(self.document, self.job, self.deduplicated)
 
     async def get(self, document_id: UUID) -> Document:

@@ -19,6 +19,7 @@ from airgap_rag.rag.types import (
     RAGStreamEvent,
     RAGStreamToken,
 )
+from airgap_rag.retrieval.filters import RetrievalFilters
 from tests.conftest import FakeDatabase, FakeJobPublisher, FakeVectorStore
 
 
@@ -34,8 +35,9 @@ class StubRAGService(RAGService):
         document_ids: list[UUID] | None,
         top_k: int,
         top_n: int,
+        filters: RetrievalFilters | None = None,
     ) -> RAGAnswer:
-        del question, session_id, document_ids, top_k, top_n
+        del question, session_id, document_ids, top_k, top_n, filters
         return self.result
 
 
@@ -59,8 +61,9 @@ class StubStreamingRAGService(RAGService):
         document_ids: list[UUID] | None,
         top_k: int,
         top_n: int,
+        filters: RetrievalFilters | None = None,
     ) -> RAGStream:
-        del question, session_id, document_ids, top_k, top_n
+        del question, session_id, document_ids, top_k, top_n, filters
         if self.prepare_error is not None:
             raise self.prepare_error
         return RAGStream(sources=self.sources, events=self.events)

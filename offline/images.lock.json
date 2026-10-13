@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "application_image": "airgap-rag:0.1.0",
+  "images": {
+    "postgres": "postgres:17-alpine",
+    "redis": "redis:8.2-alpine",
+    "qdrant": "qdrant/qdrant:v1.19.1",
+    "ollama": "ollama/ollama:0.12.11",
+    "prometheus": "prom/prometheus:v3.5.0",
+    "alertmanager": "prom/alertmanager:v0.28.1",
+    "jaeger": "jaegertracing/all-in-one:1.62.0",
+    "grafana": "grafana/grafana:12.1.1",
+    "gateway": "nginx:1.28-alpine"
+  }
+}

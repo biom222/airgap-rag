@@ -7,6 +7,7 @@ from airgap_rag.api.dependencies.retrieval import get_retrieval_service
 from airgap_rag.core.config import Settings
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
 from airgap_rag.main import create_app
+from airgap_rag.retrieval.filters import RetrievalFilters
 from airgap_rag.retrieval.service import RetrievalService, RetrievedChunk
 from tests.conftest import FakeDatabase, FakeJobPublisher, FakeVectorStore
 
@@ -23,8 +24,9 @@ class StubRetrievalService(RetrievalService):
         top_k: int,
         top_n: int | None = None,
         document_ids: list[UUID] | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[RetrievedChunk]:
-        del top_n
+        del top_n, filters
         self.received_top_k = top_k
         return [self.result]
 

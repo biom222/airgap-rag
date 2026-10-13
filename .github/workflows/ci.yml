@@ -52,9 +52,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+      - name: Validate offline Compose
+        run: >-
+          docker compose
+          --profile ollama
+          --profile observability
+          -f docker-compose.yml
+          -f docker-compose.production.yml
+          -f docker-compose.offline.yml
+          config --quiet
       - name: Build application image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: false
-

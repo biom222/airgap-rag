@@ -10,6 +10,7 @@ from airgap_rag.core.config import Settings
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
 from airgap_rag.jobs.service import JobPublisher
 from airgap_rag.main import create_app
+from airgap_rag.retrieval.filters import RetrievalFilters
 from airgap_rag.vector_store.base import VectorPoint, VectorSearchResult
 
 
@@ -47,8 +48,9 @@ class FakeVectorStore:
         limit: int,
         document_ids: list[UUID] | None = None,
         owner_id: str | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[VectorSearchResult]:
-        del owner_id
+        del owner_id, filters
         return []
 
     async def healthcheck(self) -> bool:

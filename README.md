@@ -396,6 +396,13 @@ docs/                  Russian technical documentation and ADR
 - [x] Evaluation
 - [x] Benchmarking
 - [x] Observability
-- [ ] Air-gapped deployment
+- [x] Air-gapped deployment
 - [ ] Additional inference runtimes
 - [ ] Optional UI
+
+## Offline release
+
+Изолированный контур запускается из проверяемого release bundle: Docker images, Ollama
+models, wheelhouse, source archive, SPDX SBOM и manifest с SHA-256. Offline Compose запрещает
+build/pull и закрывает egress API/data plane внутренними сетями. Полная процедура сборки, переноса, проверки,
+запуска и обновления описана в [документации air-gap deployment](docs/air-gap-deployment.md).

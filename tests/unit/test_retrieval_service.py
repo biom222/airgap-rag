@@ -6,6 +6,7 @@ from airgap_rag.db.models.documents import Document, DocumentChunk
 from airgap_rag.documents.types import DocumentStatus
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
 from airgap_rag.reranking.base import RerankDocument, RerankResult
+from airgap_rag.retrieval.filters import RetrievalFilters
 from airgap_rag.retrieval.service import RetrievalService
 from airgap_rag.vector_store.base import VectorPoint, VectorSearchResult
 
@@ -60,8 +61,9 @@ class FakeSearchVectorStore:
         limit: int,
         document_ids: list[UUID] | None = None,
         owner_id: str | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[VectorSearchResult]:
-        del owner_id
+        del owner_id, filters
         self.document_ids = document_ids
         return self.hits[:limit]
 

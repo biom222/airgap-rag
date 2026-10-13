@@ -41,6 +41,7 @@ artifacts/
 offline_bundle/models/
 offline_bundle/wheels/
 offline_bundle/docker-images/
+/offline_bundle/
 qdrant_storage/
 postgres_data/
 redis_data/

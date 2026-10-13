@@ -6,11 +6,13 @@ import pytest
 from airgap_rag.chunking.base import Chunk
 from airgap_rag.chunking.recursive import RecursiveCharacterChunker
 from airgap_rag.db.models.documents import Document, DocumentChunk
+from airgap_rag.db.repositories.indexing import LexicalSearchHit
 from airgap_rag.documents.parsers import ParserRegistry, TextParser
 from airgap_rag.documents.storage import LocalDocumentStore
 from airgap_rag.documents.types import DocumentStatus
 from airgap_rag.embeddings.mock import MockEmbeddingProvider
 from airgap_rag.indexing.service import IndexingService
+from airgap_rag.retrieval.filters import RetrievalFilters
 from airgap_rag.vector_store.base import VectorPoint, VectorSearchResult
 
 
@@ -44,6 +46,18 @@ class FakeIndexingRepository:
     ) -> dict[UUID, DocumentChunk]:
         del owner_id
         return {}
+
+    async def lexical_search(
+        self,
+        query: str,
+        *,
+        limit: int,
+        document_ids: list[UUID] | None = None,
+        owner_id: str | None = None,
+        filters: RetrievalFilters | None = None,
+    ) -> list[LexicalSearchHit]:
+        del query, limit, document_ids, owner_id, filters
+        return []
 
     async def rollback(self) -> None:
         self.rollbacks += 1
@@ -88,8 +102,9 @@ class FakeIndexVectorStore:
         limit: int,
         document_ids: list[UUID] | None = None,
         owner_id: str | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[VectorSearchResult]:
-        del owner_id
+        del owner_id, filters
         return []
 
     async def healthcheck(self) -> bool:

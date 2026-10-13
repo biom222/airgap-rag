@@ -10,6 +10,7 @@ from airgap_rag.rag.errors import ChatSessionNotFoundError, LLMServiceUnavailabl
 from airgap_rag.rag.prompting import PromptBuilder
 from airgap_rag.rag.service import INSUFFICIENT_CONTEXT_ANSWER, RAGService
 from airgap_rag.rag.types import ChatHistoryMessage, RAGStreamDone, RAGStreamToken
+from airgap_rag.retrieval.filters import RetrievalFilters
 from airgap_rag.retrieval.service import RetrievalService, RetrievedChunk
 
 
@@ -24,8 +25,9 @@ class StubRetrievalService(RetrievalService):
         top_k: int,
         top_n: int | None = None,
         document_ids: list[UUID] | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> list[RetrievedChunk]:
-        del question, top_k, document_ids
+        del question, top_k, document_ids, filters
         return self.chunks[:top_n]
 
 

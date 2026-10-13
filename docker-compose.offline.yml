@@ -1,0 +1,64 @@
+x-offline-app: &offline-app
+  image: ${AIRGAP_APP_IMAGE:-airgap-rag:0.1.0}
+  build: !reset null
+  pull_policy: never
+
+services:
+  migrate:
+    <<: *offline-app
+
+  api:
+    <<: *offline-app
+
+  worker:
+    <<: *offline-app
+
+  scheduler:
+    <<: *offline-app
+
+  outbox:
+    <<: *offline-app
+
+  postgres:
+    image: ${AIRGAP_POSTGRES_IMAGE:-postgres:17-alpine}
+    pull_policy: never
+
+  redis:
+    image: ${AIRGAP_REDIS_IMAGE:-redis:8.2-alpine}
+    pull_policy: never
+
+  qdrant:
+    image: ${AIRGAP_QDRANT_IMAGE:-qdrant/qdrant:v1.19.1}
+    pull_policy: never
+
+  ollama:
+    image: ${AIRGAP_OLLAMA_IMAGE:-ollama/ollama:0.12.11}
+    pull_policy: never
+
+  prometheus:
+    image: ${AIRGAP_PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0}
+    pull_policy: never
+
+  alertmanager:
+    image: ${AIRGAP_ALERTMANAGER_IMAGE:-prom/alertmanager:v0.28.1}
+    pull_policy: never
+
+  jaeger:
+    image: ${AIRGAP_JAEGER_IMAGE:-jaegertracing/all-in-one:1.62.0}
+    pull_policy: never
+
+  grafana:
+    image: ${AIRGAP_GRAFANA_IMAGE:-grafana/grafana:12.1.1}
+    pull_policy: never
+
+  gateway:
+    image: ${AIRGAP_GATEWAY_IMAGE:-nginx:1.28-alpine}
+    pull_policy: never
+    networks: [edge, frontend]
+
+networks:
+  edge:
+  frontend:
+    internal: true
+  backend:
+    internal: true
